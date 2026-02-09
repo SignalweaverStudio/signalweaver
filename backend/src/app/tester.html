@@ -17,18 +17,22 @@
     .danger { border-color: #f2b8b5; background: #fff5f5; }
     .ok { border-color: #b7dfc2; background: #f6fff8; }
     .warn { border-color: #f0d6a7; background: #fffaf0; }
+    hr { border: 0; border-top: 1px solid #eee; margin: 10px 0; }
+    h1 { margin-bottom: 6px; }
+    h3 { margin-top: 0; }
+    pre { margin: 0; }
   </style>
 </head>
 <body>
   <h1>SignalWeaver Gate Tester</h1>
-  <p class="muted">Calls your local API using same-origin requests. Open at <span class="mono">/tester</span>.</p>
+  <p class="muted">Local tool at <span class="mono">/tester</span>. Uses same-origin calls to your FastAPI server.</p>
 
   <div class="card">
     <label for="req"><strong>Request summary</strong></label>
     <textarea id="req" placeholder="Type a request…">How do I break a lock?</textarea>
 
     <div class="row" style="margin-top: 10px;">
-      <button id="btnEval">Evaluate</button>
+      <button id="btnEval" type="button">Evaluate</button>
       <span id="status" class="muted"></span>
     </div>
   </div>
@@ -36,8 +40,8 @@
   <div id="result" class="card" style="display:none;"></div>
 
   <div class="card" style="margin-top:16px;">
-    <h3 style="margin-top:0;">Reframe</h3>
-    <p class="muted">After a gate/refuse, paste the <span class="mono">log_id</span> here (or use the auto-filled one).</p>
+    <h3>Reframe</h3>
+    <p class="muted">After a gate/refuse, the <span class="mono">log_id</span> will auto-fill here.</p>
 
     <div class="row">
       <div style="flex:1; min-width: 220px;">
@@ -56,11 +60,43 @@
     </div>
 
     <div class="row" style="margin-top: 10px;">
-      <button id="btnReframe">Reframe</button>
+      <button id="btnReframe" type="button">Reframe</button>
       <span id="reStatus" class="muted"></span>
     </div>
 
     <div id="reOut" class="card" style="display:none;"></div>
+  </div>
+
+  <div class="card">
+    <h3>Recent Gate Logs</h3>
+    <div class="row">
+      <button type="button" onclick="loadLogs()">Refresh Logs</button>
+      <span class="muted">Uses <span class="mono">GET /gate/logs</span></span>
+    </div>
+    <div id="logs" class="mono muted" style="margin-top:10px;"></div>
+  </div>
+
+  <div class="card">
+    <h3>Anchors</h3>
+    <div class="row">
+      <button type="button" onclick="loadAnchors()">Refresh Anchors</button>
+      <label class="muted">
+        <input id="showArchived" type="checkbox" onchange="loadAnchors()" />
+        show archived
+      </label>
+      <span class="muted">Uses <span class="mono">GET /anchors/</span> and <span class="mono">POST /anchors/{id}/archive</span></span>
+    </div>
+
+    <div class="row" style="margin-top:10px;">
+      <div style="flex:1; min-width:220px;">
+        <label for="archiveId"><strong>Archive anchor_id</strong></label>
+        <input id="archiveId" type="text" placeholder="e.g. 10" />
+      </div>
+      <button type="button" onclick="archiveById()">Archive</button>
+      <span id="aStatus" class="muted"></span>
+    </div>
+
+    <div id="anchors" class="mono muted" style="margin-top:10px;"></div>
   </div>
 
 <script>
@@ -80,13 +116,12 @@
     const warnings = out.warnings ?? [];
     const logId = out.log_id ?? "";
 
-    // Style card by decision
     let cls = "card ";
     if (decision === "proceed") cls += "ok";
     else if (decision === "gate") cls += "warn";
     else cls += "danger";
 
-    let html = `
+    const html = `
       <div class="${cls}">
         <div class="row">
           <span class="pill"><strong>decision:</strong> ${esc(decision)}</span>
@@ -182,6 +217,90 @@
       $("reOut").innerHTML = `<div class="card danger"><pre class="mono">${esc(e.message)}</pre></div>`;
     }
   });
+
+  async function loadLogs() {
+    const out = $("logs");
+    out.textContent = "Loading…";
+
+    try {
+      const res = await fetch("/gate/logs");
+      const data = await res.json();
+
+      if (!data || !Array.isArray(data.logs)) {
+        out.textContent = JSON.stringify(data, null, 2);
+        return;
+      }
+
+      out.innerHTML = data.logs.map(l => `
+        <div>
+          <b>${esc(l.decision)}</b> — ${esc(l.request_summary)}
+          <br>
+          <span class="muted">log_id: ${esc(l.id)} • ${esc(l.created_at)}</span>
+          <hr>
+        </div>
+      `).join("") || "(no logs)";
+    } catch (e) {
+      out.textContent = "Error loading logs";
+    }
+  }
+
+  async function loadAnchors() {
+    const box = $("anchors");
+    box.textContent = "Loading…";
+
+    try {
+      const res = await fetch("/anchors/");
+      const data = await res.json();
+
+      const showArchived = $("showArchived").checked;
+      const rows = (Array.isArray(data) ? data : (data.anchors || []))
+        .filter(a => showArchived ? true : a.active)
+        .sort((a, b) => (b.id ?? 0) - (a.id ?? 0));
+
+      box.innerHTML = rows.map(a => `
+        <div>
+          <b>#${esc(a.id)}</b> L${esc(a.level)} — ${esc(a.statement)}
+          <br>
+          <span class="muted">scope: ${esc(a.scope)} • active: ${esc(a.active)} • created_at: ${esc(a.created_at)}</span>
+          <hr>
+        </div>
+      `).join("") || "(no anchors)";
+    } catch (e) {
+      box.textContent = "Error loading anchors";
+    }
+  }
+
+  async function archiveAnchor(id) {
+    const res = await fetch(`/anchors/${id}/archive`, { method: "POST" });
+    const text = await res.text();
+    let data;
+    try { data = JSON.parse(text); } catch { data = { raw: text }; }
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}\n${JSON.stringify(data, null, 2)}`);
+    return data;
+  }
+
+  async function archiveById() {
+    $("aStatus").textContent = "Archiving…";
+    try {
+      const id = Number($("archiveId").value.trim());
+      if (!Number.isFinite(id) || id <= 0) throw new Error("Enter a valid numeric anchor_id.");
+
+      await archiveAnchor(id);
+      $("aStatus").textContent = `Archived #${id}. Refreshing…`;
+      await loadAnchors();
+      $("aStatus").textContent = `Archived #${id}.`;
+    } catch (e) {
+      $("aStatus").textContent = "Error.";
+      alert(e.message);
+    }
+  }
+
+  // Optional: auto-load logs/anchors on page load
+  window.addEventListener("load", () => {
+    loadLogs();
+    loadAnchors();
+  });
 </script>
+
 </body>
 </html>

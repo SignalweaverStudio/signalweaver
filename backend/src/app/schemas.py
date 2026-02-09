@@ -78,6 +78,7 @@ class GateEvaluateOut(BaseModel):
     warnings: List[str] = Field(default_factory=list)
     warning_anchors: List[TruthAnchorOut] = Field(default_factory=list)
     log_id: int
+    trace_id: int | None = None 
 
 # -----------------------------
 # Gate log read schemas
@@ -121,3 +122,19 @@ class GateReframeOut(BaseModel):
     warnings: List[str] = Field(default_factory=list)
     warning_anchors: List[TruthAnchorOut] = Field(default_factory=list)
     log_id: int
+from pydantic import BaseModel
+from typing import List
+
+
+class ReplayOut(BaseModel):
+    trace_id: int
+    same_decision: bool
+    same_reason: bool
+    same_explanation: bool
+
+    anchor_drift: List[str]
+
+    decision_before: str
+    decision_now: str
+    reason_before: str
+    reason_now: str
