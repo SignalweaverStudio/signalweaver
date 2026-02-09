@@ -31,6 +31,29 @@ from app.gate import UserState, decide
 router = APIRouter()
 
 
+def _ethos_refs_for(decision: str, max_level: int | None = None) -> list[str]:
+    refs: list[str] = []
+
+    if decision == "proceed":
+        refs += ["Minimal necessary intervention"]
+    elif decision == "gate":
+        refs += ["Explainability over opacity", "Reversibility"]
+    elif decision == "refuse":
+        refs += ["Refusal is a valid act", "Agency first", "Anti-coercion / anti-gaslight"]
+    else:
+        refs += ["Explainability over opacity"]
+
+    if max_level is not None and max_level >= 3:
+        refs += ["Slow is a feature"]
+
+    # de-dupe while preserving order
+    seen = set()
+    out: list[str] = []
+    for r in refs:
+        if r not in seen:
+            seen.add(r)
+            out.append(r)
+    return out
 
 
 def _norm(s: str) -> str:
@@ -281,11 +304,15 @@ def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db)):
         suggestion=suggestion,
         explanations=explanations,
         next_actions=next_actions,
+        ethos_refs=_ethos_refs_for(decision.decision, max_level),
+
+
         conflicted_anchor_ids=conflicted_ids,
         warnings=warnings,
         warning_anchors=warning_anchor_out,
         log_id=log.id,
         trace_id=trace.id,  # NEW
+  
     )
 
 

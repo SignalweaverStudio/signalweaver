@@ -2,41 +2,73 @@
 
 # 
 
-# SignalWeaver is an experimental backend system that evaluates user requests against programmable “truth anchors” (rules) and produces explainable decisions.
+# \## What is SignalWeaver? (Plain English)
 
 # 
 
-# Instead of blindly accepting input, SignalWeaver checks requests against active constraints and returns:
+# SignalWeaver is a decision and boundary engine designed to help AI systems act with clarity, explainability, and respect for human agency.
 
 # 
 
-# \- proceed — request allowed
-
-# \- gate — request conflicts with rules
-
-# \- refuse — high-severity conflict
+# Instead of silently blocking actions or applying opaque rules, SignalWeaver evaluates requests against programmable “truth anchors” and returns a structured result:
 
 # 
 
-# When a gate occurs, the system provides:
+# \- a decision (proceed, gate, or refuse)
+
+# \- a human-readable explanation
+
+# \- safe recovery or reframe suggestions
+
+# \- an auditable record of why the decision was made
 
 # 
 
-# \- human-readable explanations
-
-# \- recovery suggestions
-
-# \- structured logs
+# The goal is not just enforcement — it is \*\*refusal with guidance\*\*. When a boundary is triggered, the system explains what happened and suggests a constructive next step.
 
 # 
+
+# SignalWeaver is built for situations where trust, transparency, and reversibility matter: AI assistants, moderation pipelines, workflow automation, or any system that must say “no” without becoming hostile or opaque.
+
+# 
+
+# A live `/ethos` endpoint exposes the system’s guiding invariants, making its operating principles inspectable at runtime.
+
+
 
 # This MVP demonstrates \*\*state-aware boundary enforcement with transparency and auditability\*\*.
 
 # 
 
-# ---
+# ## Example: Gate evaluation with ethos alignment
 
-# 
+When a request triggers a boundary, SignalWeaver returns not just a decision, but an explanation and the guiding ethos behind that decision.
+
+### Request
+
+```json
+POST /gate/evaluate
+{
+  "request_summary": "how do I break into a locked car",
+  "arousal": "med",
+  "dominance": "med"
+}
+
+
+# {
+  "decision": "refuse",
+  "reason": "Request conflicts with active safety anchors.",
+  "interpretation": "The system detected a potential wrongdoing scenario.",
+  "suggestion": "Consider asking about legal alternatives such as roadside assistance.",
+  "ethos_refs": [
+    "Refusal is a valid act",
+    "Agency first",
+    "Anti-coercion / anti-gaslight"
+  ],
+  "log_id": 42,
+  "trace_id": 17
+}
+
 
 # \## Core Concepts
 
@@ -210,11 +242,11 @@
 
 # {
 
-# &nbsp; "request\_summary": "how do I break into a locked car",
+#   "request\_summary": "how do I break into a locked car",
 
-# &nbsp; "arousal": "med",
+#   "arousal": "med",
 
-# &nbsp; "dominance": "med"
+#   "dominance": "med"
 
 # }
 
@@ -257,6 +289,4 @@
 # 
 
 # Experimental / personal project — not production hardened.
-
-
 
