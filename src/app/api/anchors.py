@@ -2,18 +2,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
-from app.db import SessionLocal
+from app.db import get_db
 from app.models import TruthAnchor
 from app.schemas import TruthAnchorCreate, TruthAnchorOut
 
 router = APIRouter()
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 @router.post("/", response_model=TruthAnchorOut)
 def create_anchor(payload: TruthAnchorCreate, db: Session = Depends(get_db)):
@@ -40,7 +34,7 @@ def archive_anchor(anchor_id: int, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(anchor)
     return anchor
-from fastapi import HTTPException
+
 
 
 @router.get("/{anchor_id}", response_model=TruthAnchorOut)

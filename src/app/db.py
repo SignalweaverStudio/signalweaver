@@ -1,8 +1,9 @@
 from pathlib import Path
 import os
+from typing import Generator
 
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, Session
 
 # Always resolve DB to an absolute path so cwd doesn't change where data is stored.
 BASE_DIR = Path(__file__).resolve().parents[2]  # .../backend/src
@@ -17,4 +18,13 @@ engine = create_engine(
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+def get_db() -> Generator[Session, None, None]:
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
 

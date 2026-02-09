@@ -1,11 +1,12 @@
 from datetime import datetime
 from typing import List, Optional
-
+import re
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func
 
-from app.db import SessionLocal
+from app.db import get_db
+
 from app.models import TruthAnchor, GateLog
 from app.schemas import (
     GateEvaluateIn,
@@ -22,12 +23,6 @@ from app.gate import UserState, decide
 router = APIRouter()
 
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 def _norm(s: str) -> str:
@@ -42,6 +37,39 @@ def _has_not(s: str) -> bool:
 def _strip_not(s: str) -> str:
     s = _norm(s)
     return " ".join(tok for tok in s.split() if tok != "not")
+def _meaningful_tokens(s: str) -> list[str]:
+    filler = {"a", "an", "the", "to", "and", "or", "of", "in", "on", "for"}
+    stop = filler | {"i", "you", "we", "it", "is", "are", "be", "will", "not", "do"}
+
+    def _stem(t: str) -> str:
+        # tiny stemming: locks->lock, breaking->break, opened->open
+        if t.endswith("ing") and len(t) > 5:
+            t = t[:-3]
+        elif t.endswith("ed") and len(t) > 4:
+            t = t[:-2]
+        elif t.endswith("s") and len(t) > 4:
+            t = t[:-1]
+        return t
+
+    # IMPORTANT: extract word-like tokens so "locks/keys" becomes ["locks", "keys"]
+    raw_tokens = re.findall(r"[a-z0-9]+", _norm(s))
+
+    toks: list[str] = []
+    for raw in raw_tokens:
+        t = _stem(raw)
+        if len(t) < 3:
+            continue
+        if t in stop:
+            continue
+        toks.append(t)
+
+    return toks
+
+
+
+
+def _bigrams(tokens: list[str]) -> set[str]:
+    return {f"{tokens[i]} {tokens[i+1]}" for i in range(len(tokens) - 1)}
 
 
 def naive_conflicts(request_summary: str, anchors: list[TruthAnchor]) -> list[TruthAnchor]:
@@ -49,9 +77,9 @@ def naive_conflicts(request_summary: str, anchors: list[TruthAnchor]) -> list[Tr
     req_has_not = _has_not(req_norm)
     req_wo_not = _strip_not(req_norm)
 
-    # Keep this simple but less noisy
-    filler = {"a", "an", "the", "to", "and", "or", "of", "in", "on", "for"}
-    stop = filler | {"i", "you", "we", "it", "is", "are", "be", "will", "not"}
+    req_tokens = _meaningful_tokens(req_norm)
+    req_token_set = set(req_tokens)
+    req_bigrams = _bigrams(req_tokens)
 
     hits: list[TruthAnchor] = []
 
@@ -65,11 +93,17 @@ def naive_conflicts(request_summary: str, anchors: list[TruthAnchor]) -> list[Tr
             hits.append(a)
             continue
 
-        # Keyword overlap fallback (meaningful tokens only)
-        stmt_tokens = [t for t in stmt_norm.split() if t not in filler][:8]
-        matched = [t for t in stmt_tokens if len(t) >= 3 and t not in stop and (t in req_norm)]
+        stmt_tokens = _meaningful_tokens(stmt_norm)
+        stmt_token_set = set(stmt_tokens)
+        stmt_bigrams = _bigrams(stmt_tokens)
 
-        if matched:
+        token_overlap = len(req_token_set & stmt_token_set)
+        bigram_overlap = len(req_bigrams & stmt_bigrams)
+
+        # Less noisy rules:
+        # - If a meaningful 2-word phrase matches, that’s strong signal.
+        # - Otherwise require at least 2 meaningful words in common.
+        if bigram_overlap >= 1 or token_overlap >= 2:
             hits.append(a)
 
     return hits
@@ -108,20 +142,33 @@ def _build_explanations(request_summary: str, conflicts: list[TruthAnchor]) -> l
             )
             continue
 
-        # Keyword overlap explanation (same general idea as naive_conflicts, but cleaner tokens)
-        stmt_tokens = [t for t in stmt_norm.split() if t not in filler][:8]
-        matched = [t for t in stmt_tokens if len(t) >= 3 and t not in stop and (t in req_norm)]
+         # Keyword overlap explanation (same general idea as naive_conflicts, but cleaner tokens)
+        req_tokens = _meaningful_tokens(req_norm)
+        req_token_set = set(req_tokens)
+        req_bigrams = _bigrams(req_tokens)
 
-        if matched:
+        stmt_tokens = _meaningful_tokens(stmt_norm)
+        stmt_token_set = set(stmt_tokens)
+        stmt_bigrams = _bigrams(stmt_tokens)
+
+        matched_tokens = sorted(req_token_set & stmt_token_set)
+        matched_bigrams = sorted(req_bigrams & stmt_bigrams)
+
+        if matched_bigrams:
             explanations.append(
-                f"{header} — triggered because the request contains keyword overlap: {', '.join(matched)}."
+                f"{header} — triggered because the request matches a meaningful phrase: {', '.join(matched_bigrams)}."
+            )
+        elif matched_tokens:
+            explanations.append(
+                f"{header} — triggered because the request shares multiple meaningful keywords: {', '.join(matched_tokens)}."
             )
         else:
             explanations.append(
-                f"{header} — triggered by the current matching rules (no specific keyword extracted)."
+                f"{header} — triggered by the current matching rules (no specific overlap extracted)."
             )
 
     return explanations
+
 
 
 @router.post("/evaluate", response_model=GateEvaluateOut, response_model_exclude_none=True)
