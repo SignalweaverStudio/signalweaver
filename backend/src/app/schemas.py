@@ -1,12 +1,52 @@
 from datetime import datetime
-from pydantic import BaseModel, Field
+from typing import List, Literal, Optional
+from pydantic import BaseModel, Field, ConfigDict
 
+# -----------------------------
+# Helpers
+# -----------------------------
+Arousal = Literal["low", "med", "high", "unknown"]
+Dominance = Literal["low", "med", "high", "unknown"]
+
+def parse_id_list(value: str) -> List[int]:
+    """
+    Converts stored anchor id strings into lists.
+    Examples:
+        ""        -> []
+        "1,2,3"   -> [1,2,3]
+        "[1,2]"   -> [1,2]
+    """
+    if not value:
+        return []
+    v = value.strip()
+    if v == "" or v == "[]":
+        return []
+    if v.startswith("[") and v.endswith("]"):
+        v = v[1:-1]
+    parts = v.split(",")
+    result: List[int] = []
+    for p in parts:
+        p = p.strip()
+        if not p:
+            continue
+        try:
+            result.append(int(p))
+        except ValueError:
+            continue
+    return result
+
+# -----------------------------
+# Truth Anchor schemas (canonical names expected by anchors.py)
+# -----------------------------
 class TruthAnchorCreate(BaseModel):
-    level: int = Field(ge=1, le=3)
-    statement: str = Field(min_length=1)
-    scope: str = Field(default="global", min_length=1)
+    level: int = Field(..., ge=1, le=3)
+    statement: str = Field(..., min_length=1, max_length=1000)
+    scope: str = Field(default="global", max_length=64)
+    active: bool = True
 
 class TruthAnchorOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    
     id: int
     level: int
     statement: str
@@ -14,14 +54,70 @@ class TruthAnchorOut(BaseModel):
     active: bool
     created_at: datetime
 
-    model_config = {"from_attributes": True}
+# Backwards/alternate friendly aliases (so other files can use shorter names)
+AnchorCreate = TruthAnchorCreate
+AnchorOut = TruthAnchorOut
+
+# -----------------------------
+# Gate evaluate schemas (match current gate router usage)
+# -----------------------------
 class GateEvaluateIn(BaseModel):
-    request_summary: str = Field(min_length=1)
-    arousal: str = Field(default="unknown")      # low/med/high/unknown
-    dominance: str = Field(default="unknown")    # low/med/high/unknown
+    request_summary: str = Field(..., min_length=1, max_length=2000)
+    arousal: Arousal = "unknown"
+    dominance: Dominance = "unknown"
 
 class GateEvaluateOut(BaseModel):
-    decision: str                  # proceed/gate/refuse
+    decision: str
     reason: str
-    conflicted_anchor_ids: list[int] = []
+    # "wow" fields: only present when we need them
+    interpretation: Optional[str] = None
+    suggestion: Optional[str] = None
+    explanations: Optional[List[str]] = None
+    next_actions: Optional[List[str]] = None
+    conflicted_anchor_ids: List[int] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    warning_anchors: List[TruthAnchorOut] = Field(default_factory=list)
+    log_id: int
+
+# -----------------------------
+# Gate log read schemas
+# -----------------------------
+class GateLogOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    
+    id: int
+    created_at: datetime
+    request_summary: str
+    arousal: Arousal
+    dominance: Dominance
+    decision: str
+    reason: str
+    conflicted_anchor_ids: List[int] = Field(default_factory=list)
+    user_choice: str
+    
+class GateLogListOut(BaseModel):
+    items: List[GateLogOut]
+    total: int
+    limit: int
+    offset: int
+
+class GateReframeIn(BaseModel):
+    log_id: int
+    new_intent: str = Field(..., min_length=1, max_length=2000)
+    # Optional: let caller override state, otherwise we reuse the original log state
+    arousal: Optional[Arousal] = None
+    dominance: Optional[Dominance] = None
+
+class GateReframeOut(BaseModel):
+    parent_log_id: int
+    reframed_request_summary: str
+    decision: str
+    reason: str
+    interpretation: str
+    suggestion: str
+    explanations: Optional[List[str]] = None
+    next_actions: List[str] = Field(default_factory=list)
+    conflicted_anchor_ids: List[int] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    warning_anchors: List[TruthAnchorOut] = Field(default_factory=list)
     log_id: int

@@ -29,9 +29,6 @@ class GateLog(Base):
     arousal: Mapped[str] = mapped_column(String(16), default="unknown")
     dominance: Mapped[str] = mapped_column(String(16), default="unknown")
 
-    interpretation: Mapped[str] = mapped_column(Text, default="")
-    suggestion: Mapped[str] = mapped_column(Text, default="")
-
     decision: Mapped[str] = mapped_column(String(16))  # proceed/gate/refuse
     reason: Mapped[str] = mapped_column(String(64), default="")
 
