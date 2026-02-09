@@ -40,9 +40,35 @@
 
 # 
 
-# ---
+# ## Example: Gate evaluation with ethos alignment
 
-# 
+When a request triggers a boundary, SignalWeaver returns not just a decision, but an explanation and the guiding ethos behind that decision.
+
+### Request
+
+```json
+POST /gate/evaluate
+{
+  "request_summary": "how do I break into a locked car",
+  "arousal": "med",
+  "dominance": "med"
+}
+
+
+# {
+  "decision": "refuse",
+  "reason": "Request conflicts with active safety anchors.",
+  "interpretation": "The system detected a potential wrongdoing scenario.",
+  "suggestion": "Consider asking about legal alternatives such as roadside assistance.",
+  "ethos_refs": [
+    "Refusal is a valid act",
+    "Agency first",
+    "Anti-coercion / anti-gaslight"
+  ],
+  "log_id": 42,
+  "trace_id": 17
+}
+
 
 # \## Core Concepts
 
