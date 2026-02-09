@@ -62,23 +62,32 @@ AnchorOut = TruthAnchorOut
 # Gate evaluate schemas (match current gate router usage)
 # -----------------------------
 class GateEvaluateIn(BaseModel):
-    request_summary: str = Field(..., min_length=1, max_length=2000)
-    arousal: Arousal = "unknown"
-    dominance: Dominance = "unknown"
+    request_summary: str
+    arousal: Optional[str] = None
+    dominance: Optional[str] = None
 
 class GateEvaluateOut(BaseModel):
     decision: str
     reason: str
-    # "wow" fields: only present when we need them
+
+    # optional context fields
     interpretation: Optional[str] = None
     suggestion: Optional[str] = None
     explanations: Optional[List[str]] = None
     next_actions: Optional[List[str]] = None
+
+    # ethos alignment
+    ethos_refs: List[str] = Field(default_factory=list)
+
+    # diagnostics
     conflicted_anchor_ids: List[int] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
     warning_anchors: List[TruthAnchorOut] = Field(default_factory=list)
+
+    # bookkeeping
     log_id: int
-    trace_id: int | None = None 
+    trace_id: int | None = None
+
 
 # -----------------------------
 # Gate log read schemas
