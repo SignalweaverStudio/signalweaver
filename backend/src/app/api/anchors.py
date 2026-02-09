@@ -3,7 +3,6 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select
 
 from app.db import get_db
-
 from app.models import TruthAnchor
 from app.schemas import TruthAnchorCreate, TruthAnchorOut
 
@@ -35,7 +34,7 @@ def archive_anchor(anchor_id: int, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(anchor)
     return anchor
-from fastapi import HTTPException
+
 
 
 @router.get("/{anchor_id}", response_model=TruthAnchorOut)
