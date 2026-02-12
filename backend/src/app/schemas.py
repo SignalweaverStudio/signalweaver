@@ -1,7 +1,9 @@
 from datetime import datetime
 from enum import Enum
 from typing import List, Optional, Any
+from typing import Literal
 
+DecisionLiteral = Literal["proceed", "gate", "refuse"]
 from pydantic import BaseModel, Field, ConfigDict
 
 
@@ -61,7 +63,7 @@ class GateEvaluateIn(BaseModel):
 
 
 class GateEvaluateOut(BaseModel):
-    decision: str
+    decision: DecisionLiteral
     reason: str
     conflicted_anchor_ids: List[int] = []
     log_id: int
@@ -75,7 +77,7 @@ class GateLogOut(BaseModel):
     request_summary: str
     arousal: Arousal
     dominance: Dominance
-    decision: str
+    decision: DecisionLiteral
     reason: str
     interpretation: str = ""
     suggestion: str = ""
@@ -99,7 +101,7 @@ class GateReframeIn(BaseModel):
 class GateReframeOut(BaseModel):
     parent_log_id: int
     reframed_request_summary: str
-    decision: str
+    decision: DecisionLiteral
     reason: str
     conflicted_anchor_ids: List[int] = []
     warnings: List[str] = []
@@ -107,9 +109,19 @@ class GateReframeOut(BaseModel):
 
 
 class ReplayOut(BaseModel):
-    log: Optional[GateLogOut] = None
-    details: Optional[Any] = None
+    trace_id: int
+    same_decision: bool
+    same_reason: bool
+    same_explanation: bool
+    anchor_drift: Any
 
+    decision_before: str
+    decision_now: str
+
+    reason_before: str
+    reason_now: str
+
+    explanation: str = ""
 
 class PolicyProfileCreate(BaseModel):
     name: str
