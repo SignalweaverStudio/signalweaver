@@ -1,35 +1,54 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import List
+from typing import List, Literal
+
+
+GateDecisionKind = Literal["proceed", "gate"]
 
 
 @dataclass
 class UserState:
-    arousal: str       # low/med/high/unknown
-    dominance: str     # low/med/high/unknown
+    """
+    arousal/dominance are categorical strings:
+      'low' | 'med' | 'high' | 'unknown'
+    request is optional (used by replay/trace paths).
+    """
+    arousal: str
+    dominance: str
+    request: str = ""
 
 
 @dataclass
 class GateDecision:
-    decision: str      # proceed | gate | refuse
+    decision: GateDecisionKind
     reason: str
     conflicted_anchor_ids: List[int]
     interpretation: str
     suggestion: str
-    next_actions: List[str]   # UI-ready actions
+    next_actions: List[str]
 
 
-def decide(state: UserState, conflicted_anchor_ids: List[int], max_level_conflict: int) -> GateDecision:
+def decide(
+    state: UserState,
+    conflicted_anchor_ids: List[int],
+    max_level_conflict: int,
+) -> GateDecision:
     """
-    Minimal v1.2 Gate logic with UI-ready next actions.
+    Minimal v1.x Gate logic with UI-ready next actions.
     """
 
+    # Level 3+ conflicts are treated as protected constraints
     if max_level_conflict >= 3:
         if state.arousal == "high" and state.dominance == "low":
             return GateDecision(
                 decision="gate",
                 reason="state_mismatch_with_l3_anchor",
                 conflicted_anchor_ids=conflicted_anchor_ids,
-                interpretation="This conflicts with a level-3 boundary while your state reads high-arousal / low-control.",
+                interpretation=(
+                    "This conflicts with a level-3 boundary while your state reads "
+                    "high-arousal / low-control."
+                ),
                 suggestion="Pause, then reframe the intent to align with the boundary.",
                 next_actions=["pause", "reframe", "view_conflicts"],
             )
@@ -43,6 +62,7 @@ def decide(state: UserState, conflicted_anchor_ids: List[int], max_level_conflic
             next_actions=["reframe", "view_conflicts", "cancel"],
         )
 
+    # Lower-level conflicts: proceed, but warn
     if conflicted_anchor_ids:
         return GateDecision(
             decision="proceed",
@@ -53,6 +73,7 @@ def decide(state: UserState, conflicted_anchor_ids: List[int], max_level_conflic
             next_actions=["proceed", "tighten_wording", "view_conflicts"],
         )
 
+    # No conflicts
     return GateDecision(
         decision="proceed",
         reason="no_high_conflict",
