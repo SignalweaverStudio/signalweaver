@@ -7,10 +7,14 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select, func
 from fastapi import APIRouter, Depends
 from app.security import verify_api_key
-from fastapi import Depends
-from app.security import verify_api_key
+from fastapi import Depends, Request
+from app.security import verify_api_key, rate_limit
+
 
 from app.db import get_db
+def _rl(request: Request):
+    # Adjust numbers if you want stricter/looser
+    rate_limit(request, limit=60, window_s=60)
 
 from app.models import (
     TruthAnchor,
@@ -41,8 +45,9 @@ def _norm_state(v: str | None) -> str:
     return v if v in ("low", "med", "high", "unknown") else "unknown"
 
 router = APIRouter(
-    dependencies=[Depends(verify_api_key)],
+    dependencies=[Depends(verify_api_key), Depends(_rl)],
 )
+
 
 
 

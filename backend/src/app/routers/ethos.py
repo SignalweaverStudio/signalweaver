@@ -1,12 +1,16 @@
 from fastapi import APIRouter
 from fastapi.responses import PlainTextResponse
 from pathlib import Path
-from fastapi import Depends
-from app.security import verify_api_key
+from fastapi import Depends, Request
+from app.security import verify_api_key, rate_limit
+
+def _rl(request: Request):
+    rate_limit(request, limit=60, window_s=60)
 
 router = APIRouter(
-    dependencies=[Depends(verify_api_key)],
+    dependencies=[Depends(verify_api_key), Depends(_rl)],
 )
+
 
 
 
