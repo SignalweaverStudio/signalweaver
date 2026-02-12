@@ -5,6 +5,10 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func
+from fastapi import APIRouter, Depends
+from app.security import verify_api_key
+from fastapi import Depends
+from app.security import verify_api_key
 
 from app.db import get_db
 
@@ -30,8 +34,18 @@ from app.schemas import (
 )
 from app.gate import UserState, decide
 
+def _norm_state(v: str | None) -> str:
+    if not v:
+        return "unknown"
+    v = v.strip().lower()
+    return v if v in ("low", "med", "high", "unknown") else "unknown"
 
-router = APIRouter()
+router = APIRouter(
+    dependencies=[Depends(verify_api_key)],
+)
+
+
+
 
 
 def _ethos_refs_for(decision: str, max_level: int | None = None) -> list[str]:
@@ -266,7 +280,11 @@ def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db)):
 
     # 3) Run decision logic
     decision = decide(
-        state=UserState(arousal=payload.arousal, dominance=payload.dominance),
+        state=UserState(
+            arousal=_norm_state(payload.arousal),
+            dominance=_norm_state(payload.dominance),
+            request=payload.request_summary,
+        ),
         conflicted_anchor_ids=conflicted_ids,
         max_level_conflict=max_level,
     )
@@ -370,8 +388,12 @@ def reframe(payload: GateReframeIn, db: Session = Depends(get_db)):
     reframed = payload.new_intent.strip()
 
     # Reuse original state unless overridden
-    arousal = payload.arousal or parent.arousal
-    dominance = payload.dominance or parent.dominance
+    arousal_raw = payload.arousal or parent.arousal
+    dominance_raw = payload.dominance or parent.dominance
+
+    # Normalize state values
+    arousal = _norm_state(arousal_raw)
+    dominance = _norm_state(dominance_raw)
 
     # Re-run conflict detection on the reframed text
     stmt_all = select(TruthAnchor).where(TruthAnchor.active == True)  # noqa: E712
@@ -385,7 +407,11 @@ def reframe(payload: GateReframeIn, db: Session = Depends(get_db)):
 
     # Run decision logic
     decision = decide(
-        state=UserState(arousal=arousal, dominance=dominance),
+        state=UserState(
+            arousal=arousal,
+            dominance=dominance,
+            request=reframed,
+        ),
         conflicted_anchor_ids=conflicted_ids,
         max_level_conflict=max_level,
     )
@@ -494,6 +520,7 @@ def replay(trace_id: int, db: Session = Depends(get_db)):
     state = UserState(
         arousal=trace.arousal,
         dominance=trace.dominance,
+        request=request_text,
     )
 
     # Run the real deterministic engine
@@ -529,6 +556,7 @@ def replay(trace_id: int, db: Session = Depends(get_db)):
         decision_now=decision_now,
         reason_before=trace.reason,
         reason_now=reason_now,
+        explanation=explanation_now,
     )
 
 
