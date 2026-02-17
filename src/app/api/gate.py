@@ -5,8 +5,16 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func
+from fastapi import APIRouter, Depends
+from app.security import verify_api_key
+from fastapi import Depends, Request
+from app.security import verify_api_key, rate_limit
+
 
 from app.db import get_db
+def _rl(request: Request):
+    # Adjust numbers if you want stricter/looser
+    rate_limit(request, limit=60, window_s=60)
 
 from app.models import (
     TruthAnchor,
@@ -30,8 +38,19 @@ from app.schemas import (
 )
 from app.gate import UserState, decide
 
+def _norm_state(v: str | None) -> str:
+    if not v:
+        return "unknown"
+    v = v.strip().lower()
+    return v if v in ("low", "med", "high", "unknown") else "unknown"
 
-router = APIRouter()
+router = APIRouter(
+    dependencies=[Depends(verify_api_key), Depends(_rl)],
+)
+
+
+
+
 
 
 def _ethos_refs_for(decision: str, max_level: int | None = None) -> list[str]:
@@ -251,12 +270,14 @@ def _build_explanations(request_summary: str, conflicts: list[TruthAnchor]) -> l
 
 @router.post("/evaluate", response_model=GateEvaluateOut, response_model_exclude_none=True)
 def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db)):
-    # 1) Load the anchor set we actually evaluated against
+    # 1) Load active anchors
     stmt_all = select(TruthAnchor).where(TruthAnchor.active == True)  # noqa: E712
     active_anchors = list(db.scalars(stmt_all).all())
 
-    # 2) Run your existing conflict logic (unchanged)
+    # 2) Run conflict detection
     conflicts = naive_conflicts(payload.request_summary, active_anchors)
+    explanations = _build_explanations(payload.request_summary, conflicts)
+    explanation_text = " | ".join(explanations)
 
     conflicted_ids = [a.id for a in conflicts]
     warnings = [a.statement for a in conflicts]
@@ -264,27 +285,33 @@ def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db)):
 
     max_level = max((a.level for a in conflicts), default=0)
 
-    # 3) Run your deterministic decision (unchanged)
+    # 3) Run decision logic
     decision = decide(
-        state=UserState(arousal=payload.arousal, dominance=payload.dominance),
+        state=UserState(
+            arousal=_norm_state(payload.arousal),
+            dominance=_norm_state(payload.dominance),
+            request=payload.request_summary,
+        ),
         conflicted_anchor_ids=conflicted_ids,
         max_level_conflict=max_level,
     )
 
-    # 4) Prepare log row (unchanged fields)
+    # 4) Prepare log row
     log = GateLog(
-        request_summary=payload.request_summary,
-        arousal=payload.arousal,
-        dominance=payload.dominance,
-        decision=decision.decision,
-        reason=decision.reason,
-        conflicted_anchor_ids=",".join(str(i) for i in conflicted_ids),
-    )
+    request_summary=payload.request_summary,
+    arousal=payload.arousal,
+    dominance=payload.dominance,
+    decision=decision.decision,
+    reason=decision.reason,
+    conflicted_anchor_ids=",".join(str(i) for i in conflicted_ids),
+    interpretation=explanation_text,)
+
+
 
     db.add(log)
     db.flush()  # assigns log.id without committing yet
 
-    # 5) Create DecisionTrace (NEW)
+    # 5) Create DecisionTrace
     match_debug = {
         "evaluated_anchor_count": len(active_anchors),
         "conflicted_ids": conflicted_ids,
@@ -299,14 +326,15 @@ def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db)):
         dominance=payload.dominance,
         decision=decision.decision,
         reason=decision.reason,
-        explanation=getattr(decision, "explanation", "") or getattr(decision, "explain", "") or "",
+        explanation=explanation_text,
+
         match_debug_json=json.dumps(match_debug, ensure_ascii=False),
     )
 
     db.add(trace)
     db.flush()  # assigns trace.id
 
-    # 6) Snapshot ALL anchors considered (NEW) + mark which ones conflicted
+    # 6) Snapshot ALL anchors considered + mark which ones conflicted
     conflicted_set = set(conflicted_ids)
     for a in active_anchors:
         db.add(
@@ -356,7 +384,7 @@ def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db)):
         warnings=warnings,
         warning_anchors=warning_anchor_out,
         log_id=log.id,
-        trace_id=trace.id,  # NEW
+        trace_id=trace.id,
     )
 
 
@@ -370,10 +398,14 @@ def reframe(payload: GateReframeIn, db: Session = Depends(get_db)):
     reframed = payload.new_intent.strip()
 
     # Reuse original state unless overridden
-    arousal = payload.arousal or parent.arousal
-    dominance = payload.dominance or parent.dominance
+    arousal_raw = payload.arousal or parent.arousal
+    dominance_raw = payload.dominance or parent.dominance
 
-    # Re-run conflict detection on the reframed text (no profile binding yet)
+    # Normalize state values
+    arousal = _norm_state(arousal_raw)
+    dominance = _norm_state(dominance_raw)
+
+    # Re-run conflict detection on the reframed text
     stmt_all = select(TruthAnchor).where(TruthAnchor.active == True)  # noqa: E712
     active_anchors = list(db.scalars(stmt_all).all())
 
@@ -385,7 +417,11 @@ def reframe(payload: GateReframeIn, db: Session = Depends(get_db)):
 
     # Run decision logic
     decision = decide(
-        state=UserState(arousal=arousal, dominance=dominance),
+        state=UserState(
+            arousal=arousal,
+            dominance=dominance,
+            request=reframed,
+        ),
         conflicted_anchor_ids=conflicted_ids,
         max_level_conflict=max_level,
     )
@@ -481,7 +517,6 @@ def replay(trace_id: int, db: Session = Depends(get_db)):
 
     # Re-run decision using CURRENT anchors (same request)
     request_text = trace.request_text
-    request_norm = _norm(request_text)
 
     # Preserve original anchor ordering from the trace
     anchors_ordered_now = [current_by_id[i] for i in anchor_ids if i in current_by_id]
@@ -495,6 +530,7 @@ def replay(trace_id: int, db: Session = Depends(get_db)):
     state = UserState(
         arousal=trace.arousal,
         dominance=trace.dominance,
+        request=request_text,
     )
 
     # Run the real deterministic engine
@@ -512,6 +548,16 @@ def replay(trace_id: int, db: Session = Depends(get_db)):
             return obj[name]
         return default
 
+        decision_now = _get(result, "decision", "")
+    reason_now = _get(result, "reason", "")
+
+    # your project sometimes uses "explanation" and sometimes "explain"
+    explanation_now = _get(result, "explanation", "")
+    if not explanation_now:
+        explanation_now = _get(result, "explain", "")
+    if not explanation_now:
+        explanation_now = trace.explanation or ""
+        # Extract current evaluation fields (tolerant to result shape)
     decision_now = _get(result, "decision", "")
     reason_now = _get(result, "reason", "")
 
@@ -519,6 +565,8 @@ def replay(trace_id: int, db: Session = Depends(get_db)):
     explanation_now = _get(result, "explanation", "")
     if not explanation_now:
         explanation_now = _get(result, "explain", "")
+    if not explanation_now:
+        explanation_now = trace.explanation or ""
 
     return ReplayOut(
         trace_id=trace.id,
@@ -530,7 +578,9 @@ def replay(trace_id: int, db: Session = Depends(get_db)):
         decision_now=decision_now,
         reason_before=trace.reason,
         reason_now=reason_now,
+        explanation=explanation_now,
     )
+
 
 
 @router.get("/logs", response_model=GateLogListOut)
