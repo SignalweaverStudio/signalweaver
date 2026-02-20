@@ -548,38 +548,16 @@ def replay(trace_id: int, db: Session = Depends(get_db)):
             return obj[name]
         return default
 
-        decision_now = _get(result, "decision", "")
-    reason_now = _get(result, "reason", "")
-
-    # your project sometimes uses "explanation" and sometimes "explain"
-    explanation_now = _get(result, "explanation", "")
-    if not explanation_now:
-        explanation_now = _get(result, "explain", "")
-    if not explanation_now:
-        explanation_now = trace.explanation or ""
         # Extract current evaluation fields (tolerant to result shape)
-    decision_now = _get(result, "decision", "")
-    reason_now = _get(result, "reason", "")
+decision_now = _get(result, "decision", "")
+reason_now = _get(result, "reason", "")
 
-    # your project sometimes uses "explanation" and sometimes "explain"
-    explanation_now = _get(result, "explanation", "")
-    if not explanation_now:
-        explanation_now = _get(result, "explain", "")
-    if not explanation_now:
-        explanation_now = trace.explanation or ""
-
-    return ReplayOut(
-        trace_id=trace.id,
-        same_decision=(decision_now == trace.decision),
-        same_reason=(reason_now == trace.reason),
-        same_explanation=(explanation_now == trace.explanation),
-        anchor_drift=drift,
-        decision_before=trace.decision,
-        decision_now=decision_now,
-        reason_before=trace.reason,
-        reason_now=reason_now,
-        explanation=explanation_now,
-    )
+# project sometimes uses "explanation" and sometimes "explain"
+explanation_now = _get(result, "explanation", "")
+if not explanation_now:
+    explanation_now = _get(result, "explain", "")
+if not explanation_now:
+    explanation_now = trace.explanation or ""
 
 
 
