@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import select
-
+from fastapi import Request
+from app.security import verify_api_key, rate_limit
 from app.db import get_db
 from app.models import PolicyProfile, PolicyProfileAnchor, TruthAnchor
 from app.schemas import (
@@ -12,8 +13,11 @@ from app.schemas import (
     ProfileAnchorsIn,
     ProfileAnchorsOut,
 )
-
-router = APIRouter()
+def _rl(request: Request):
+    rate_limit(request, limit=60, window_s=60)
+router = APIRouter(
+    dependencies=[Depends(verify_api_key), Depends(_rl)]
+)
 
 
 @router.post("", response_model=PolicyProfileOut, status_code=201)
