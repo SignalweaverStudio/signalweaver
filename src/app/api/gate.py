@@ -540,7 +540,7 @@ def replay(trace_id: int, db: Session = Depends(get_db)):
         max_level_conflict=max_level,
     )
 
-    # Make extraction tolerant to result shape (attr or dict)
+           # Make extraction tolerant to result shape (attr or dict)
     def _get(obj, name: str, default=""):
         if hasattr(obj, name):
             return getattr(obj, name)
@@ -548,16 +548,28 @@ def replay(trace_id: int, db: Session = Depends(get_db)):
             return obj[name]
         return default
 
-        # Extract current evaluation fields (tolerant to result shape)
-decision_now = _get(result, "decision", "")
-reason_now = _get(result, "reason", "")
+    # Extract current evaluation fields
+    decision_now = _get(result, "decision", "")
+    reason_now = _get(result, "reason", "")
 
-# project sometimes uses "explanation" and sometimes "explain"
-explanation_now = _get(result, "explanation", "")
-if not explanation_now:
-    explanation_now = _get(result, "explain", "")
-if not explanation_now:
-    explanation_now = trace.explanation or ""
+    explanation_now = _get(result, "explanation", "")
+    if not explanation_now:
+        explanation_now = _get(result, "explain", "")
+    if not explanation_now:
+        explanation_now = trace.explanation or ""
+
+    return ReplayOut(
+        trace_id=trace.id,
+        same_decision=(decision_now == trace.decision),
+        same_reason=(reason_now == trace.reason),
+        same_explanation=(explanation_now == (trace.explanation or "")),
+        anchor_drift=drift,
+        decision_before=trace.decision,
+        decision_now=decision_now,
+        reason_before=trace.reason,
+        reason_now=reason_now,
+        explanation=explanation_now,
+    )
 
 
 
@@ -624,3 +636,4 @@ def list_gate_logs(
         limit=limit,
         offset=offset,
     )
+        
