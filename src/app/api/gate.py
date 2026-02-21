@@ -483,7 +483,7 @@ def reframe(payload: GateReframeIn, db: Session = Depends(get_db)):
 
     return GateReframeOut(
         parent_log_id=parent.id,
-        reframed_request_summary=reframed,
+        reframed_request=reframed,
         decision=decision.decision,
         reason=decision.reason,
         interpretation=getattr(decision, "interpretation", ""),
