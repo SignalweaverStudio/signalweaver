@@ -337,53 +337,55 @@ def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db)):
 
 
 
-    db.add(log)
-    db.flush()  # assigns log.id without committing yet
+    try:
+        db.add(log)
+        db.flush()  # assigns log.id without committing yet
 
-    # 5) Create DecisionTrace
-    match_debug = {
-        "evaluated_anchor_count": len(active_anchors),
-        "conflicted_ids": conflicted_ids,
-        "max_level_conflict": max_level,
-    }
+        # 5) Create DecisionTrace
+        match_debug = {
+            "evaluated_anchor_count": len(active_anchors),
+            "conflicted_ids": conflicted_ids,
+            "max_level_conflict": max_level,
+        }
 
-    trace = DecisionTrace(
-        policy_profile_id=None,
-        request_text=payload.request_summary,
-        request_normalized=_norm(payload.request_summary),
-        arousal=payload.arousal,
-        dominance=payload.dominance,
-        decision=decision.decision,
-        reason=decision.reason,
-        explanation=explanation_text,
-
-        match_debug_json=json.dumps(match_debug, ensure_ascii=False),
-    )
-
-    db.add(trace)
-    db.flush()  # assigns trace.id
-
-    # 6) Snapshot ALL anchors considered + mark which ones conflicted
-    conflicted_set = set(conflicted_ids)
-    for a in active_anchors:
-        db.add(
-            DecisionTraceAnchor(
-                trace_id=trace.id,
-                anchor_id=a.id,
-                anchor_hash=a.stable_hash(),
-                level_snapshot=a.level,
-                scope_snapshot=a.scope,
-                active_snapshot=bool(a.active),
-                statement_snapshot=a.statement,
-                matched=(a.id in conflicted_set),
-                match_note=("conflict" if a.id in conflicted_set else ""),
-            )
+        trace = DecisionTrace(
+            policy_profile_id=None,
+            request_text=payload.request_summary,
+            request_normalized=_norm(payload.request_summary),
+            arousal=payload.arousal,
+            dominance=payload.dominance,
+            decision=decision.decision,
+            reason=decision.reason,
+            explanation=explanation_text,
+            match_debug_json=json.dumps(match_debug, ensure_ascii=False),
         )
 
-    # 7) Commit once (log + trace + trace anchors)
-    db.commit()
-    db.refresh(log)
+        db.add(trace)
+        db.flush()  # assigns trace.id
 
+        # 6) Snapshot ALL anchors considered + mark which ones conflicted
+        conflicted_set = set(conflicted_ids)
+        for a in active_anchors:
+            db.add(
+                DecisionTraceAnchor(
+                    trace_id=trace.id,
+                    anchor_id=a.id,
+                    anchor_hash=a.stable_hash(),
+                    level_snapshot=a.level,
+                    scope_snapshot=a.scope,
+                    active_snapshot=bool(a.active),
+                    statement_snapshot=a.statement,
+                    matched=(a.id in conflicted_set),
+                    match_note=("conflict" if a.id in conflicted_set else ""),
+                )
+            )
+
+        # 7) Commit once (log + trace + trace anchors)
+        db.commit()
+
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to persist decision trace")
     # Convert ORM anchors -> schema objects for response stability
     warning_anchor_out = [
         AnchorOut.model_validate(a, from_attributes=True) for a in warning_anchors
