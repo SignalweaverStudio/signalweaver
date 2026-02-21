@@ -305,8 +305,8 @@ def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db)):
 
     # 2) Run conflict detection
     conflicts = naive_conflicts(payload.request_summary, active_anchors)
-    explanations = _build_explanations(payload.request_summary, conflicts)
-    explanation_text = " | ".join(explanations)
+    explanations_list = _build_explanations(payload.request_summary, conflicts)
+    explanation_text = " | ".join(explanations_list)
 
     conflicted_ids = [a.id for a in conflicts]
     warnings = [a.statement for a in conflicts]
@@ -406,7 +406,7 @@ def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db)):
         reason=decision.reason,
         interpretation=interpretation,
         suggestion=suggestion,
-        explanations=explanations,
+        explanations = explanations_list,
         next_actions=next_actions,
         ethos_refs=_ethos_refs_for(decision.decision, max_level),
         conflicted_anchor_ids=conflicted_ids,
