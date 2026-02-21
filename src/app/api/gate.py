@@ -127,10 +127,10 @@ import re
 
 _MONEY_RE = re.compile(r"(£|\$|€)\s*([0-9][0-9,]*(?:\.[0-9]+)?)")
 
-def _has_refund_word(text: str) -> bool:
-    t = " ".join(text.lower().split())
-    return "refund" in t  # catches refund/refunds/refunded etc.
+_REFUND_RE = re.compile(r"\brefund\w*\b", re.IGNORECASE)
 
+def _has_refund_word(text: str) -> bool:
+    return bool(_REFUND_RE.search(text))
 def _max_money_amount(text: str) -> float:
     """
     Returns the maximum money amount found in text, or 0.0 if none.
