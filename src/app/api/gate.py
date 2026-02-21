@@ -408,7 +408,7 @@ def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db)):
         reason=decision.reason,
         interpretation=interpretation,
         suggestion=suggestion,
-        explanations = explanations_list,
+        explanations=explanations_list if decision.decision != "proceed" else None,
         next_actions=next_actions,
         ethos_refs=_ethos_refs_for(decision.decision, max_level),
         conflicted_anchor_ids=conflicted_ids,
