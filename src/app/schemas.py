@@ -98,6 +98,8 @@ class GateLogOut(BaseModel):
 class GateLogListOut(BaseModel):
     items: List[GateLogOut]
     total: int
+    limit: int = 50
+    offset: int = 0
 
 
 class GateReframeIn(BaseModel):
