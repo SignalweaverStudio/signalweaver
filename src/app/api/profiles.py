@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 from fastapi import Request
+from sqlalchemy import delete
 from app.security import verify_api_key, rate_limit
 from app.db import get_db
 from app.models import PolicyProfile, PolicyProfileAnchor, TruthAnchor
@@ -178,9 +179,11 @@ def set_profile_anchors(
             )
 
     # Clear existing associations
-    db.query(PolicyProfileAnchor).filter(
+    db.execute(
+    delete(PolicyProfileAnchor).where(
         PolicyProfileAnchor.profile_id == profile_id
-    ).delete()
+    )
+)
 
     # Add new associations
     for anchor_id in payload.anchor_ids:
