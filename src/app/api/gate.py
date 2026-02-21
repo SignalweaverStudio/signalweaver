@@ -557,10 +557,9 @@ def replay(trace_id: int, db: Session = Depends(get_db)):
 
     # Build UserState exactly as your normal evaluation would
     state = UserState(
-        arousal=trace.arousal,
-        dominance=trace.dominance,
-        request=request_text,
-    )
+    arousal=_norm_state(trace.arousal),
+    dominance=_norm_state(trace.dominance),
+)
 
     # Run the real deterministic engine
     result = decide(
