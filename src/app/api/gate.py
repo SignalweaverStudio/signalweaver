@@ -582,7 +582,18 @@ def replay(trace_id: int, db: Session = Depends(get_db)):
 
     explanation_now = trace.explanation or ""
     same_explanation = True
+    # Detect newly added active anchors not present in original trace
+    all_active_ids = set(
+        db.execute(
+            select(TruthAnchor.id).where(TruthAnchor.active == True)  # noqa: E712
+        ).scalars().all()
+    )
 
+    original_ids = set(anchor_ids)
+    new_ids = all_active_ids - original_ids
+
+    if new_ids:
+        drift.append(f"{len(new_ids)} new active anchors added since trace (not replayed)")
     return ReplayOut(
         trace_id=trace.id,
         same_decision=(decision_now == trace.decision),
