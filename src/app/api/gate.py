@@ -211,10 +211,10 @@ def naive_conflicts(request_summary: str, anchors: list[TruthAnchor]) -> list[Tr
         # - Otherwise require at least 2 meaningful words in common.
         if bigram_overlap >= 1 or token_overlap >= 2:
             hits.append(a)
-       # If request looks like a refund over 100, force-match refund anchors by scope.
+          # If request looks like a refund over 100, force-match refund anchors by scope.
     if refund_hit and max_amt > 100:
         for a in anchors:
-            if getattr(a, "active", True) and getattr(a, "scope", "") == "payments.refunds":
+            if getattr(a, "active", False) and getattr(a, "scope", "") == "payments.refunds":
                 if a not in hits:
                     hits.append(a)
     return hits
