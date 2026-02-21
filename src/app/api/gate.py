@@ -123,13 +123,37 @@ def _meaningful_tokens(s: str) -> list[str]:
 
 def _bigrams(tokens: list[str]) -> set[str]:
     return {f"{tokens[i]} {tokens[i+1]}" for i in range(len(tokens) - 1)}
+import re
 
+_MONEY_RE = re.compile(r"(£|\$|€)\s*([0-9][0-9,]*(?:\.[0-9]+)?)")
+
+def _has_refund_word(text: str) -> bool:
+    t = " ".join(text.lower().split())
+    return "refund" in t  # catches refund/refunds/refunded etc.
+
+def _max_money_amount(text: str) -> float:
+    """
+    Returns the maximum money amount found in text, or 0.0 if none.
+    Handles £1,000.50 style numbers.
+    """
+    max_amt = 0.0
+    for m in _MONEY_RE.finditer(text):
+        num = m.group(2).replace(",", "")
+        try:
+            amt = float(num)
+            if amt > max_amt:
+                max_amt = amt
+        except ValueError:
+            continue
+    return max_amt
 
 def naive_conflicts(request_summary: str, anchors: list[TruthAnchor]) -> list[TruthAnchor]:
     req_norm = _norm(request_summary)
     req_has_not = _has_not(req_norm)
     req_wo_not = _strip_not(req_norm)
-
+    # --- Domain heuristic: refunds over £100 ---
+    refund_hit = _has_refund_word(request_summary)
+    max_amt = _max_money_amount(request_summary)
     # Detect "safe lockout" intent (legal next steps, avoid forced entry)
     safe_markers = {
         "legal", "lawful", "licensed", "locksmith", "roadside", "assistance",
@@ -187,7 +211,12 @@ def naive_conflicts(request_summary: str, anchors: list[TruthAnchor]) -> list[Tr
         # - Otherwise require at least 2 meaningful words in common.
         if bigram_overlap >= 1 or token_overlap >= 2:
             hits.append(a)
-
+       # If request looks like a refund over 100, force-match refund anchors by scope.
+    if refund_hit and max_amt > 100:
+        for a in anchors:
+            if getattr(a, "active", True) and getattr(a, "scope", "") == "payments.refunds":
+                if a not in hits:
+                    hits.append(a)
     return hits
 
 
