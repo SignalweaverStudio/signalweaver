@@ -144,14 +144,14 @@ class PolicyProfileCreate(BaseModel):
     name: str
     description: Optional[str] = None
     is_default: Optional[bool] = False
-    parent_id: Optional[int] = None
+    
 
 
 class PolicyProfileUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     is_default: Optional[bool] = None
-    parent_id: Optional[int] = None
+    
 
 
 class PolicyProfileOut(BaseModel):
@@ -159,7 +159,7 @@ class PolicyProfileOut(BaseModel):
     name: str
     description: Optional[str]
     is_default: bool
-    parent_id: Optional[int]
+    
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

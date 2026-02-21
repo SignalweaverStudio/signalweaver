@@ -44,7 +44,7 @@ def create_profile(payload: PolicyProfileCreate, db: Session = Depends(get_db)):
         name=payload.name,
         description=payload.description,
         is_default=payload.is_default or False,
-        parent_id=payload.parent_id,
+        
     )
 
     db.add(profile)
