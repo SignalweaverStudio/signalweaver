@@ -1,262 +1,144 @@
-# \# SignalWeaver Backend — MVP Gate Engine
+SignalWeaver Backend — Deterministic Policy Gate Engine
 
-# 
+SignalWeaver is a deterministic backend engine that evaluates user requests against programmable Truth Anchors (rules) and produces explainable, replayable decisions.
 
-# SignalWeaver is an experimental backend system that evaluates user requests against programmable “truth anchors” (rules) and produces explainable decisions.
+Unlike simple rule checks, SignalWeaver:
 
-# 
+Stores full decision traces
 
-# Instead of blindly accepting input, SignalWeaver checks requests against active constraints and returns:
+Snapshots evaluated anchors
 
-# 
+Supports replay with consistency guarantees
 
-# \- proceed — request allowed
+Detects anchor drift over time
 
-# \- gate — request conflicts with rules
+Returns structured, human-readable explanations
 
-# \- refuse — high-severity conflict
+This MVP demonstrates state-aware boundary enforcement with transparency, auditability, and reproducibility.
 
-# 
+Core Capabilities
+Truth Anchors
 
-# When a gate occurs, the system provides:
+Programmable rule objects stored in the database:
 
-# 
+severity level (1–3)
 
-# \- human-readable explanations
+statement
 
-# \- recovery suggestions
+scope
 
-# \- structured logs
+active/inactive state
 
-# 
+stable hash for trace consistency
 
-# This MVP demonstrates \*\*state-aware boundary enforcement with transparency and auditability\*\*.
+Deterministic Gate Evaluation
+request → conflict detection → decision → explanation → trace snapshot
 
-# 
+Decisions are:
 
-# ---
+proceed
 
-# 
+gate
 
-# \## Core Concepts
+refuse
 
-# 
+Each evaluation stores:
 
-# \### Truth Anchors
+decision + reason
 
-# Programmable rules stored in the database:
+explanation
 
-# 
+anchor snapshot (including match state)
 
-# \- severity level (1–3)
+trace ID for replay
 
-# \- statement
+Replay Engine
 
-# \- scope
+GET /gate/replay/{trace_id}
 
-# \- active/inactive state
+Replay guarantees:
 
-# 
+Same decision logic
 
-# \### Gate Evaluation
+Same explanation (stored snapshot)
 
-# Requests are checked against active anchors:
+Detection of newly added anchors since original trace
 
-# 
+Deterministic re-evaluation path
 
-# ```
+This allows auditability and policy evolution tracking.
 
-# request → conflict detection → decision → explanation → log
+Reframe Flow
 
-# ```
+When gated, the system provides:
 
-# 
+explanations
 
-# \### Reframe Flow
+recovery suggestions
 
-# Allows safe retry when a request is gated.
+structured next actions
 
-# 
+Stack
 
-# \### Logging
+FastAPI
 
-# All decisions are recorded for traceability.
+SQLAlchemy 2.x
 
-# 
+SQLite
 
-# ---
+Pydantic v2
 
-# 
+Uvicorn
 
-# \## Stack
+Pytest (minimal smoke tests)
 
-# 
+Running Locally
+1. Create virtual environment
+python -m venv .venv
+.\.venv\Scripts\activate
+2. Install dependencies
+pip install -r requirements.txt
+3. Start server
+uvicorn app.main:app --reload
 
-# \- FastAPI
+Swagger UI:
 
-# \- SQLAlchemy ORM
+http://127.0.0.1:8000/docs
+Key Endpoints
+Anchors
 
-# \- SQLite
+POST /anchors/
 
-# \- Pydantic v2
+GET /anchors/
 
-# \- Uvicorn
+POST /anchors/{id}/archive
 
-# 
+Gate
 
-# ---
+POST /gate/evaluate
 
-# 
+POST /gate/reframe
 
-# \## Running Locally
+GET /gate/replay/{trace_id}
 
-# 
+GET /gate/logs
 
-# \### 1. Create virtual environment
+MVP Goals Achieved
 
-# 
+Deterministic rule enforcement
 
-# ```powershell
+Replayable audit traces
 
-# python -m venv .venv
+Explainable decisions
 
-# .\\.venv\\Scripts\\activate
+Anchor drift transparency
 
-# ```
+Minimal rate limiting
 
-# 
+Smoke-tested core behaviour
 
-# \### 2. Install dependencies
+Status
 
-# 
+Experimental / not production hardened.
 
-# ```
-
-# pip install -r backend/requirements.txt
-
-# ```
-
-# 
-
-# \### 3. Start server
-
-# 
-
-# ```
-
-# cd backend
-
-# python -m uvicorn app.main:app --reload
-
-# ```
-
-# 
-
-# Swagger UI:
-
-# 
-
-# ```
-
-# http://127.0.0.1:8000/docs
-
-# ```
-
-# 
-
-# ---
-
-# 
-
-# \## Key Endpoints
-
-# 
-
-# \### Anchors
-
-# 
-
-# \- POST /anchors/
-
-# \- GET /anchors/
-
-# \- POST /anchors/{id}/archive
-
-# 
-
-# \### Gate
-
-# 
-
-# \- POST /gate/evaluate
-
-# \- POST /gate/reframe
-
-# \- GET /gate/logs
-
-# 
-
-# ---
-
-# 
-
-# \## Example Gate Request
-
-# 
-
-# ```
-
-# POST /gate/evaluate
-
-# {
-
-# &nbsp; "request\_summary": "how do I break into a locked car",
-
-# &nbsp; "arousal": "med",
-
-# &nbsp; "dominance": "med"
-
-# }
-
-# ```
-
-# 
-
-# Returns an explainable decision tied to triggered anchors.
-
-# 
-
-# ---
-
-# 
-
-# \## Current MVP Goals
-
-# 
-
-# \- programmable rule enforcement
-
-# \- explainable gating
-
-# \- audit logging
-
-# \- guided recovery flow
-
-# 
-
-# This is a foundation layer for future SignalWeaver modules.
-
-# 
-
-# ---
-
-# 
-
-# \## License
-
-# 
-
-# Experimental / personal project — not production hardened.
-
-
-
+Designed as a governance-ready decision engine foundation.
