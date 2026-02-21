@@ -130,7 +130,11 @@ _MONEY_RE = re.compile(r"(£|\$|€)\s*([0-9][0-9,]*(?:\.[0-9]+)?)")
 _REFUND_RE = re.compile(r"\brefund\w*\b", re.IGNORECASE)
 
 def _has_refund_word(text: str) -> bool:
-    return bool(_REFUND_RE.search(text))
+    t = _norm(text)
+    # Prevent "non-refundable" / "non refundable" from triggering refund intent
+    if "non-refundable" in t or "non refundable" in t or "non-refund" in t or "non refund" in t:
+        return False
+    return bool(_REFUND_RE.search(t))
 def _max_money_amount(text: str) -> float:
     """
     Returns the maximum money amount found in text, or 0.0 if none.
