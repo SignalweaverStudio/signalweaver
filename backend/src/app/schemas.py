@@ -68,6 +68,15 @@ class GateEvaluateOut(BaseModel):
     conflicted_anchor_ids: List[int] = []
     log_id: int
 
+    # optional/extended fields (previously being silently dropped)
+    trace_id: Optional[int] = None
+    interpretation: Optional[str] = None
+    suggestion: Optional[str] = None
+    explanations: Optional[List[str]] = None
+    next_actions: Optional[List[str]] = None
+    ethos_refs: List[str] = []
+    warnings: List[str] = []
+    warning_anchors: List[AnchorOut] = []
 
 class GateLogOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -99,13 +108,21 @@ class GateReframeIn(BaseModel):
 
 
 class GateReframeOut(BaseModel):
-    parent_log_id: int
-    reframed_request_summary: str
     decision: DecisionLiteral
     reason: str
+    reframed_request: str
     conflicted_anchor_ids: List[int] = []
-    warnings: List[str] = []
     log_id: int
+    trace_id: Optional[int] = None
+
+    # optional/extended fields (previously being silently dropped)
+    interpretation: Optional[str] = None
+    suggestion: Optional[str] = None
+    explanations: Optional[List[str]] = None
+    next_actions: Optional[List[str]] = None
+    ethos_refs: List[str] = []
+    warnings: List[str] = []
+    warning_anchors: List[AnchorOut] = []
 
 
 class ReplayOut(BaseModel):
@@ -127,14 +144,14 @@ class PolicyProfileCreate(BaseModel):
     name: str
     description: Optional[str] = None
     is_default: Optional[bool] = False
-    parent_id: Optional[int] = None
+    
 
 
 class PolicyProfileUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     is_default: Optional[bool] = None
-    parent_id: Optional[int] = None
+    
 
 
 class PolicyProfileOut(BaseModel):
@@ -142,7 +159,7 @@ class PolicyProfileOut(BaseModel):
     name: str
     description: Optional[str]
     is_default: bool
-    parent_id: Optional[int]
+    
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

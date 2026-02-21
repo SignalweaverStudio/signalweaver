@@ -5,26 +5,15 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func
-from fastapi import APIRouter, Depends
-from app.security import verify_api_key
-from fastapi import Depends, Request
-from app.security import verify_api_key, rate_limit
-
 
 from app.db import get_db
-def _rl(request: Request):
-    # Adjust numbers if you want stricter/looser
-    rate_limit(request, limit=60, window_s=60)
 
 from app.models import (
     TruthAnchor,
     GateLog,
     DecisionTrace,
     DecisionTraceAnchor,
-    PolicyProfile,
-    PolicyProfileAnchor,
 )
-
 from app.schemas import (
     GateEvaluateIn,
     GateEvaluateOut,
@@ -38,44 +27,10 @@ from app.schemas import (
 )
 from app.gate import UserState, decide
 
-def _norm_state(v: str | None) -> str:
-    if not v:
-        return "unknown"
-    v = v.strip().lower()
-    return v if v in ("low", "med", "high", "unknown") else "unknown"
 
-router = APIRouter(
-    dependencies=[Depends(verify_api_key), Depends(_rl)],
-)
+router = APIRouter()
 
 
-
-
-
-
-def _ethos_refs_for(decision: str, max_level: int | None = None) -> list[str]:
-    refs: list[str] = []
-
-    if decision == "proceed":
-        refs += ["Minimal necessary intervention"]
-    elif decision == "gate":
-        refs += ["Explainability over opacity", "Reversibility"]
-    elif decision == "refuse":
-        refs += ["Refusal is a valid act", "Agency first", "Anti-coercion / anti-gaslight"]
-    else:
-        refs += ["Explainability over opacity"]
-
-    if max_level is not None and max_level >= 3:
-        refs += ["Slow is a feature"]
-
-    # de-dupe while preserving order
-    seen = set()
-    out: list[str] = []
-    for r in refs:
-        if r not in seen:
-            seen.add(r)
-            out.append(r)
-    return out
 
 
 def _norm(s: str) -> str:
@@ -90,8 +45,6 @@ def _has_not(s: str) -> bool:
 def _strip_not(s: str) -> str:
     s = _norm(s)
     return " ".join(tok for tok in s.split() if tok != "not")
-
-
 def _meaningful_tokens(s: str) -> list[str]:
     filler = {"a", "an", "the", "to", "and", "or", "of", "in", "on", "for"}
     stop = filler | {"i", "you", "we", "it", "is", "are", "be", "will", "not", "do"}
@@ -121,65 +74,20 @@ def _meaningful_tokens(s: str) -> list[str]:
     return toks
 
 
+
+
 def _bigrams(tokens: list[str]) -> set[str]:
     return {f"{tokens[i]} {tokens[i+1]}" for i in range(len(tokens) - 1)}
-import re
 
-_MONEY_RE = re.compile(r"(£|\$|€)\s*([0-9][0-9,]*(?:\.[0-9]+)?)")
-
-_REFUND_RE = re.compile(r"\brefund\w*\b", re.IGNORECASE)
-
-def _has_refund_word(text: str) -> bool:
-    return bool(_REFUND_RE.search(text))
-def _max_money_amount(text: str) -> float:
-    """
-    Returns the maximum money amount found in text, or 0.0 if none.
-    Handles £1,000.50 style numbers.
-    """
-    max_amt = 0.0
-    for m in _MONEY_RE.finditer(text):
-        num = m.group(2).replace(",", "")
-        try:
-            amt = float(num)
-            if amt > max_amt:
-                max_amt = amt
-        except ValueError:
-            continue
-    return max_amt
 
 def naive_conflicts(request_summary: str, anchors: list[TruthAnchor]) -> list[TruthAnchor]:
     req_norm = _norm(request_summary)
     req_has_not = _has_not(req_norm)
     req_wo_not = _strip_not(req_norm)
-    # --- Domain heuristic: refunds over £100 ---
-    refund_hit = _has_refund_word(request_summary)
-    max_amt = _max_money_amount(request_summary)
-    # Detect "safe lockout" intent (legal next steps, avoid forced entry)
-    safe_markers = {
-        "legal", "lawful", "licensed", "locksmith", "roadside", "assistance",
-        "manufacturer", "proof", "ownership", "insurance", "police", "tow",
-    }
-    avoid_markers = {"avoid", "please avoid", "do not", "dont", "without details", "no forced entry"}
-    has_safe = any(w in req_norm for w in safe_markers)
-    has_avoid = any(w in req_norm for w in avoid_markers)
-    safe_lockout = has_safe and has_avoid
-
-    # Detect explicit high-risk phrasing (we should still gate even if "safe" words appear)
-    high_risk_phrases = {
-        "break into", "break in", "bypass", "lockpick", "pick lock", "hotwire",
-        "slim jim", "jimmy", "forced entry", "steal", "theft",
-    }
-    has_high_risk = any(p in req_norm for p in high_risk_phrases)
 
     req_tokens = _meaningful_tokens(req_norm)
     req_token_set = set(req_tokens)
     req_bigrams = _bigrams(req_tokens)
-
-    # High-risk normalization: map common bypass phrasing to canonical bigrams
-    if ("bypass" in req_norm) and (("lock" in req_norm) or ("key" in req_norm)):
-        req_bigrams.add("break into")
-    if ("unlock" in req_norm) and ("without" in req_norm) and ("key" in req_norm):
-        req_bigrams.add("break into")
 
     hits: list[TruthAnchor] = []
 
@@ -193,12 +101,6 @@ def naive_conflicts(request_summary: str, anchors: list[TruthAnchor]) -> list[Tr
             hits.append(a)
             continue
 
-        # Safe-intent carveout: if it's a lawful lockout request and not explicitly high-risk,
-        # don't treat car break-in/bypass anchors as conflicts.
-        if safe_lockout and not has_high_risk:
-            if ("breaking into cars" in stmt_norm) or ("bypassing locks" in stmt_norm) or ("break into" in stmt_norm):
-                continue
-
         stmt_tokens = _meaningful_tokens(stmt_norm)
         stmt_token_set = set(stmt_tokens)
         stmt_bigrams = _bigrams(stmt_tokens)
@@ -207,39 +109,29 @@ def naive_conflicts(request_summary: str, anchors: list[TruthAnchor]) -> list[Tr
         bigram_overlap = len(req_bigrams & stmt_bigrams)
 
         # Less noisy rules:
-        # - If a meaningful 2-word phrase matches, that's strong signal.
+        # - If a meaningful 2-word phrase matches, that’s strong signal.
         # - Otherwise require at least 2 meaningful words in common.
         if bigram_overlap >= 1 or token_overlap >= 2:
             hits.append(a)
-          # If request looks like a refund over 100, force-match refund anchors by scope.
-    if refund_hit and max_amt > 100:
-        for a in anchors:
-            if getattr(a, "active", False) and getattr(a, "scope", "") == "payments.refunds":
-                if a not in hits:
-                    hits.append(a)
+
     return hits
 
 
 def _build_explanations(request_summary: str, conflicts: list[TruthAnchor]) -> list[str]:
     """
     Create plain-English per-anchor explanations for why each anchor was flagged.
-    Adds explicit high-risk intent explanations for known patterns.
-    """
 
+    This is intentionally lightweight and transparent:
+    - If we hit the "strong negation conflict", explain that.
+    - Otherwise, explain that there was keyword overlap and show which words matched.
+    """
     req_norm = _norm(request_summary)
     req_has_not = _has_not(req_norm)
     req_wo_not = _strip_not(req_norm)
 
     explanations: list[str] = []
 
-    # High-risk phrasing detector (matches the logic used in naive_conflicts)
-    high_risk_phrases = {
-        "break into", "break in", "bypass", "lockpick", "pick lock",
-        "hotwire", "slim jim", "jimmy", "forced entry", "steal", "theft",
-    }
-
-    high_risk_hits = [p for p in high_risk_phrases if p in req_norm]
-
+    # Keep these small and obvious; this is MVP explainability, not NLP.
     filler = {"a", "an", "the", "to", "and", "or", "of", "in", "on", "for"}
     stop = filler | {"i", "you", "we", "it", "is", "are", "be", "will", "not"}
 
@@ -248,25 +140,17 @@ def _build_explanations(request_summary: str, conflicts: list[TruthAnchor]) -> l
         stmt_has_not = _has_not(stmt_norm)
         stmt_wo_not = _strip_not(stmt_norm)
 
-        header = f'Anchor L{a.level} ({a.scope}): "{a.statement}"'
+        header = f"Anchor L{a.level} ({a.scope}): “{a.statement}”"
 
-        # Strong negation conflict
+        # Strong negation conflict (semantic inversion)
         if req_wo_not == stmt_wo_not and (req_has_not != stmt_has_not):
             explanations.append(
                 f"{header} — triggered because the request and anchor match after removing 'not', "
-                f"but one is negated and the other isn't (semantic inversion)."
+                f"but one is negated and the other isn’t (semantic inversion)."
             )
             continue
 
-        # High-risk intent explanation (preferred when detected)
-        if high_risk_hits:
-            explanations.append(
-                f"{header} — triggered because the request contains high-risk intent phrasing: "
-                f"{', '.join(high_risk_hits)}."
-            )
-            continue
-
-        # Keyword overlap explanation
+         # Keyword overlap explanation (same general idea as naive_conflicts, but cleaner tokens)
         req_tokens = _meaningful_tokens(req_norm)
         req_token_set = set(req_tokens)
         req_bigrams = _bigrams(req_tokens)
@@ -280,33 +164,29 @@ def _build_explanations(request_summary: str, conflicts: list[TruthAnchor]) -> l
 
         if matched_bigrams:
             explanations.append(
-                f"{header} — triggered because the request matches a meaningful phrase: "
-                f"{', '.join(matched_bigrams)}."
+                f"{header} — triggered because the request matches a meaningful phrase: {', '.join(matched_bigrams)}."
             )
         elif matched_tokens:
             explanations.append(
-                f"{header} — triggered because the request shares multiple meaningful keywords: "
-                f"{', '.join(matched_tokens)}."
+                f"{header} — triggered because the request shares multiple meaningful keywords: {', '.join(matched_tokens)}."
             )
         else:
             explanations.append(
-                f"{header} — triggered by the current matching rules "
-                f"(no specific overlap extracted)."
+                f"{header} — triggered by the current matching rules (no specific overlap extracted)."
             )
 
     return explanations
 
 
+
 @router.post("/evaluate", response_model=GateEvaluateOut, response_model_exclude_none=True)
 def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db)):
-    # 1) Load active anchors
+    # 1) Load the anchor set we actually evaluated against
     stmt_all = select(TruthAnchor).where(TruthAnchor.active == True)  # noqa: E712
     active_anchors = list(db.scalars(stmt_all).all())
 
-    # 2) Run conflict detection
+    # 2) Run your existing conflict logic (unchanged)
     conflicts = naive_conflicts(payload.request_summary, active_anchors)
-    explanations_list = _build_explanations(payload.request_summary, conflicts)
-    explanation_text = " | ".join(explanations_list)
 
     conflicted_ids = [a.id for a in conflicts]
     warnings = [a.statement for a in conflicts]
@@ -314,78 +194,69 @@ def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db)):
 
     max_level = max((a.level for a in conflicts), default=0)
 
-    # 3) Run decision logic
+    # 3) Run your deterministic decision (unchanged)
     decision = decide(
-        state=UserState(
-            arousal=_norm_state(payload.arousal),
-            dominance=_norm_state(payload.dominance),
-            request=payload.request_summary,
-        ),
+        state=UserState(arousal=payload.arousal, dominance=payload.dominance),
         conflicted_anchor_ids=conflicted_ids,
         max_level_conflict=max_level,
     )
 
-    # 4) Prepare log row
+    # 4) Prepare log row (unchanged fields)
     log = GateLog(
-    request_summary=payload.request_summary,
-    arousal=payload.arousal,
-    dominance=payload.dominance,
-    decision=decision.decision,
-    reason=decision.reason,
-    conflicted_anchor_ids=",".join(str(i) for i in conflicted_ids),
-    interpretation=explanation_text,)
+        request_summary=payload.request_summary,
+        arousal=payload.arousal,
+        dominance=payload.dominance,
+        decision=decision.decision,
+        reason=decision.reason,
+        conflicted_anchor_ids=",".join(str(i) for i in conflicted_ids),
+    )
 
+    db.add(log)
+    db.flush()  # assigns log.id without committing yet
 
+    # 5) Create DecisionTrace (NEW)
+    match_debug = {
+        "evaluated_anchor_count": len(active_anchors),
+        "conflicted_ids": conflicted_ids,
+        "max_level_conflict": max_level,
+    }
 
-    try:
-        db.add(log)
-        db.flush()  # assigns log.id without committing yet
+    trace = DecisionTrace(
+        policy_profile_id=None,
+        request_text=payload.request_summary,
+        request_normalized=_norm(payload.request_summary),
+        arousal=payload.arousal,
+        dominance=payload.dominance,
+        decision=decision.decision,
+        reason=decision.reason,
+        explanation=getattr(decision, "explanation", "") or getattr(decision, "explain", "") or "",
+        match_debug_json=json.dumps(match_debug, ensure_ascii=False),
+    )
 
-        # 5) Create DecisionTrace
-        match_debug = {
-            "evaluated_anchor_count": len(active_anchors),
-            "conflicted_ids": conflicted_ids,
-            "max_level_conflict": max_level,
-        }
+    db.add(trace)
+    db.flush()  # assigns trace.id
 
-        trace = DecisionTrace(
-            policy_profile_id=None,
-            request_text=payload.request_summary,
-            request_normalized=_norm(payload.request_summary),
-            arousal=payload.arousal,
-            dominance=payload.dominance,
-            decision=decision.decision,
-            reason=decision.reason,
-            explanation=explanation_text,
-            match_debug_json=json.dumps(match_debug, ensure_ascii=False),
+    # 6) Snapshot ALL anchors considered (NEW) + mark which ones conflicted
+    conflicted_set = set(conflicted_ids)
+    for a in active_anchors:
+        db.add(
+            DecisionTraceAnchor(
+                trace_id=trace.id,
+                anchor_id=a.id,
+                anchor_hash=a.stable_hash(),
+                level_snapshot=a.level,
+                scope_snapshot=a.scope,
+                active_snapshot=bool(a.active),
+                statement_snapshot=a.statement,
+                matched=(a.id in conflicted_set),
+                match_note=("conflict" if a.id in conflicted_set else ""),
+            )
         )
 
-        db.add(trace)
-        db.flush()  # assigns trace.id
+    # 7) Commit once (log + trace + trace anchors)
+    db.commit()
+    db.refresh(log)
 
-        # 6) Snapshot ALL anchors considered + mark which ones conflicted
-        conflicted_set = set(conflicted_ids)
-        for a in active_anchors:
-            db.add(
-                DecisionTraceAnchor(
-                    trace_id=trace.id,
-                    anchor_id=a.id,
-                    anchor_hash=a.stable_hash(),
-                    level_snapshot=a.level,
-                    scope_snapshot=a.scope,
-                    active_snapshot=bool(a.active),
-                    statement_snapshot=a.statement,
-                    matched=(a.id in conflicted_set),
-                    match_note=("conflict" if a.id in conflicted_set else ""),
-                )
-            )
-
-        # 7) Commit once (log + trace + trace anchors)
-        db.commit()
-
-    except Exception:
-        db.rollback()
-        raise HTTPException(status_code=500, detail="Failed to persist decision trace")
     # Convert ORM anchors -> schema objects for response stability
     warning_anchor_out = [
         AnchorOut.model_validate(a, from_attributes=True) for a in warning_anchors
@@ -408,14 +279,13 @@ def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db)):
         reason=decision.reason,
         interpretation=interpretation,
         suggestion=suggestion,
-        explanations = explanations_list,
+        explanations=explanations,
         next_actions=next_actions,
-        ethos_refs=_ethos_refs_for(decision.decision, max_level),
         conflicted_anchor_ids=conflicted_ids,
         warnings=warnings,
         warning_anchors=warning_anchor_out,
         log_id=log.id,
-        trace_id=trace.id,
+        trace_id=trace.id,  # NEW
     )
 
 
@@ -429,30 +299,21 @@ def reframe(payload: GateReframeIn, db: Session = Depends(get_db)):
     reframed = payload.new_intent.strip()
 
     # Reuse original state unless overridden
-    arousal_raw = payload.arousal or parent.arousal
-    dominance_raw = payload.dominance or parent.dominance
-
-    # Normalize state values
-    arousal = _norm_state(arousal_raw)
-    dominance = _norm_state(dominance_raw)
+    arousal = payload.arousal or parent.arousal
+    dominance = payload.dominance or parent.dominance
 
     # Re-run conflict detection on the reframed text
     stmt_all = select(TruthAnchor).where(TruthAnchor.active == True)  # noqa: E712
     active_anchors = list(db.scalars(stmt_all).all())
 
-    # Run conflict detection with the reframed request
     conflicts = naive_conflicts(reframed, active_anchors)
     conflicted_ids = [a.id for a in conflicts]
     warnings = [a.statement for a in conflicts]
+
     max_level = max((a.level for a in conflicts), default=0)
 
-    # Run decision logic
     decision = decide(
-        state=UserState(
-            arousal=arousal,
-            dominance=dominance,
-            request=reframed,
-        ),
+        state=UserState(arousal=arousal, dominance=dominance),
         conflicted_anchor_ids=conflicted_ids,
         max_level_conflict=max_level,
     )
@@ -462,6 +323,8 @@ def reframe(payload: GateReframeIn, db: Session = Depends(get_db)):
         request_summary=reframed,
         arousal=arousal,
         dominance=dominance,
+        interpretation=getattr(decision, "interpretation", ""),
+        suggestion=getattr(decision, "suggestion", ""),
         decision=decision.decision,
         reason=decision.reason,
         conflicted_anchor_ids=",".join(str(i) for i in conflicted_ids),
@@ -495,7 +358,6 @@ def reframe(payload: GateReframeIn, db: Session = Depends(get_db)):
         warning_anchors=warning_anchor_out,
         log_id=log.id,
     )
-
 
 @router.get("/replay/{trace_id}", response_model=ReplayOut)
 def replay(trace_id: int, db: Session = Depends(get_db)):
@@ -548,29 +410,23 @@ def replay(trace_id: int, db: Session = Depends(get_db)):
 
     # Re-run decision using CURRENT anchors (same request)
     request_text = trace.request_text
+    request_norm = _norm(request_text)
 
     # Preserve original anchor ordering from the trace
     anchors_ordered_now = [current_by_id[i] for i in anchor_ids if i in current_by_id]
 
-    # Re-run conflict detection
-    conflicts = naive_conflicts(request_text, anchors_ordered_now)
-    conflicted_ids = [a.id for a in conflicts]
-    max_level = max((a.level for a in conflicts), default=0)
-
     # Build UserState exactly as your normal evaluation would
+    # (We only have request/arousal/dominance here; add more fields later if needed.)
     state = UserState(
-    arousal=_norm_state(trace.arousal),
-    dominance=_norm_state(trace.dominance),
-)
-
-    # Run the real deterministic engine
-    result = decide(
-        state=state,
-        conflicted_anchor_ids=conflicted_ids,
-        max_level_conflict=max_level,
+        request=request_norm,
+        arousal=trace.arousal,
+        dominance=trace.dominance,
     )
 
-           # Make extraction tolerant to result shape (attr or dict)
+    # Run the real deterministic engine
+    result = decide(state, anchors_ordered_now)
+
+    # Make extraction tolerant to result shape (attr or dict)
     def _get(obj, name: str, default=""):
         if hasattr(obj, name):
             return getattr(obj, name)
@@ -578,37 +434,25 @@ def replay(trace_id: int, db: Session = Depends(get_db)):
             return obj[name]
         return default
 
-    # Extract current evaluation fields
     decision_now = _get(result, "decision", "")
     reason_now = _get(result, "reason", "")
 
-    explanation_now = trace.explanation or ""
-    same_explanation = True
-    # Detect newly added active anchors not present in original trace
-    all_active_ids = set(
-        db.execute(
-            select(TruthAnchor.id).where(TruthAnchor.active == True)  # noqa: E712
-        ).scalars().all()
-    )
+    # your project sometimes uses "explanation" and sometimes "explain"
+    explanation_now = _get(result, "explanation", "")
+    if not explanation_now:
+        explanation_now = _get(result, "explain", "")
 
-    original_ids = set(anchor_ids)
-    new_ids = all_active_ids - original_ids
-
-    if new_ids:
-        drift.append(f"{len(new_ids)} new active anchors added since trace (not replayed)")
     return ReplayOut(
         trace_id=trace.id,
         same_decision=(decision_now == trace.decision),
         same_reason=(reason_now == trace.reason),
-        same_explanation=True,
+        same_explanation=(explanation_now == trace.explanation),
         anchor_drift=drift,
         decision_before=trace.decision,
         decision_now=decision_now,
         reason_before=trace.reason,
         reason_now=reason_now,
-        explanation=explanation_now,
     )
-
 
 
 @router.get("/logs", response_model=GateLogListOut)
@@ -674,4 +518,6 @@ def list_gate_logs(
         limit=limit,
         offset=offset,
     )
-        
+
+
+

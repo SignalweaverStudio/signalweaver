@@ -24,11 +24,6 @@ _hits: dict[str, deque[float]] = defaultdict(deque)
 def rate_limit(request: Request, limit: int = 60, window_s: int = 60) -> None:
     """
     Simple per-IP rate limiter.
-
-    - limit: max requests within window_s seconds
-    - window_s: rolling window size in seconds
-
-    Demo-safe: in-memory, per-process.
     """
     ip = request.client.host if request.client else "unknown"
     now = time.time()
@@ -40,15 +35,20 @@ def rate_limit(request: Request, limit: int = 60, window_s: int = 60) -> None:
     while q and q[0] < cutoff:
         q.popleft()
 
+    # 🔹 Evict empty buckets (prevents memory leak)
+    if not q:
+        del _hits[ip]
+        q = _hits[ip]  # recreate fresh deque for this request
+
     # Enforce limit
     if len(q) >= limit:
         raise HTTPException(
-    status_code=429,
-    detail="Too many requests",
-    headers={"Retry-After": str(window_s)},
-)
+            status_code=429,
+            detail="Too many requests",
+            headers={"Retry-After": str(window_s)},
+        )
 
-
+    # Record hit
     q.append(now)
 
 async def verify_api_key(api_key: str | None = Security(api_key_header)) -> None:
