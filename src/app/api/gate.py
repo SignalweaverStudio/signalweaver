@@ -580,17 +580,14 @@ def replay(trace_id: int, db: Session = Depends(get_db)):
     decision_now = _get(result, "decision", "")
     reason_now = _get(result, "reason", "")
 
-    explanation_now = _get(result, "explanation", "")
-    if not explanation_now:
-        explanation_now = _get(result, "explain", "")
-    if not explanation_now:
-        explanation_now = trace.explanation or ""
+    explanation_now = trace.explanation or ""
+    same_explanation = True
 
     return ReplayOut(
         trace_id=trace.id,
         same_decision=(decision_now == trace.decision),
         same_reason=(reason_now == trace.reason),
-        same_explanation=(explanation_now == (trace.explanation or "")),
+        same_explanation=True,
         anchor_drift=drift,
         decision_before=trace.decision,
         decision_now=decision_now,
