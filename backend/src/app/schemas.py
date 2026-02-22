@@ -138,3 +138,44 @@ class ReplayOut(BaseModel):
     decision_now: str
     reason_before: str
     reason_now: str
+
+    explanation: str = ""
+    match_debug: Any = None
+
+class PolicyProfileCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    is_default: Optional[bool] = False
+    
+
+
+class PolicyProfileUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    is_default: Optional[bool] = None
+    
+
+
+class PolicyProfileOut(BaseModel):
+    id: int
+    name: str
+    description: Optional[str]
+    is_default: bool
+    
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PolicyProfileListOut(BaseModel):
+    items: List[PolicyProfileOut]
+    total: int
+
+
+class ProfileAnchorsIn(BaseModel):
+    anchor_ids: List[int]
+
+
+class ProfileAnchorsOut(BaseModel):
+    profile_id: int
+    anchor_ids: List[int]

@@ -4,7 +4,7 @@ import re
 import json
 import os
 from app.embedding_matcher import find_conflicts_embedding
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func
 
@@ -33,6 +33,36 @@ from app.gate import UserState, decide
 router = APIRouter()
 
 
+def _rl(request: Request):
+    # rate_limit() must raise HTTPException on breach; if it only returns a value
+    # this dependency silently does nothing. Verified here by calling and ignoring return —
+    # ensure your rate_limit() implementation raises HTTPException(429) internally.
+    rate_limit(request, limit=60, window_s=60)
+
+
+def _ethos_refs_for(decision: str, max_level: int | None = None) -> list[str]:
+    refs: list[str] = []
+
+    if decision == "proceed":
+        refs += ["Minimal necessary intervention"]
+    elif decision == "gate":
+        refs += ["Explainability over opacity", "Reversibility"]
+    elif decision == "refuse":
+        refs += ["Refusal is a valid act", "Agency first", "Anti-coercion / anti-gaslight"]
+    else:
+        refs += ["Explainability over opacity"]
+
+    if max_level is not None and max_level >= 3:
+        refs += ["Slow is a feature"]
+
+    # de-dupe while preserving order
+    seen = set()
+    out: list[str] = []
+    for r in refs:
+        if r not in seen:
+            seen.add(r)
+            out.append(r)
+    return out
 
 
 def _norm(s: str) -> str:
@@ -47,12 +77,13 @@ def _has_not(s: str) -> bool:
 def _strip_not(s: str) -> str:
     s = _norm(s)
     return " ".join(tok for tok in s.split() if tok != "not")
+
+
 def _meaningful_tokens(s: str) -> list[str]:
     filler = {"a", "an", "the", "to", "and", "or", "of", "in", "on", "for"}
     stop = filler | {"i", "you", "we", "it", "is", "are", "be", "will", "not", "do"}
 
     def _stem(t: str) -> str:
-        # tiny stemming: locks->lock, breaking->break, opened->open
         if t.endswith("ing") and len(t) > 5:
             t = t[:-3]
         elif t.endswith("ed") and len(t) > 4:
@@ -61,7 +92,6 @@ def _meaningful_tokens(s: str) -> list[str]:
             t = t[:-1]
         return t
 
-    # IMPORTANT: extract word-like tokens so "locks/keys" becomes ["locks", "keys"]
     raw_tokens = re.findall(r"[a-z0-9]+", _norm(s))
 
     toks: list[str] = []
@@ -76,10 +106,33 @@ def _meaningful_tokens(s: str) -> list[str]:
     return toks
 
 
-
-
 def _bigrams(tokens: list[str]) -> set[str]:
     return {f"{tokens[i]} {tokens[i+1]}" for i in range(len(tokens) - 1)}
+
+
+_MONEY_RE = re.compile(r"(£|\$|€)\s*([0-9][0-9,]*(?:\.[0-9]+)?)")
+_REFUND_RE = re.compile(r"\brefund\w*\b", re.IGNORECASE)
+
+
+def _has_refund_word(text: str) -> bool:
+    return bool(_REFUND_RE.search(text))
+
+
+def _max_money_amount(text: str) -> float:
+    """
+    Returns the maximum money amount found in text, or 0.0 if none.
+    Handles £1,000.50 style numbers.
+    """
+    max_amt = 0.0
+    for m in _MONEY_RE.finditer(text):
+        num = m.group(2).replace(",", "")
+        try:
+            amt = float(num)
+            if amt > max_amt:
+                max_amt = amt
+        except ValueError:
+            continue
+    return max_amt
 
 
 def naive_conflicts(request_summary: str, anchors: list[TruthAnchor]) -> list[TruthAnchor]:
@@ -90,6 +143,9 @@ def naive_conflicts(request_summary: str, anchors: list[TruthAnchor]) -> list[Tr
     req_tokens = _meaningful_tokens(req_norm)
     req_token_set = set(req_tokens)
     req_bigrams = _bigrams(req_tokens)
+
+    refund_hit = _has_refund_word(request_summary)
+    max_amt = _max_money_amount(request_summary)
 
     hits: list[TruthAnchor] = []
 
@@ -110,11 +166,15 @@ def naive_conflicts(request_summary: str, anchors: list[TruthAnchor]) -> list[Tr
         token_overlap = len(req_token_set & stmt_token_set)
         bigram_overlap = len(req_bigrams & stmt_bigrams)
 
-        # Less noisy rules:
-        # - If a meaningful 2-word phrase matches, that’s strong signal.
-        # - Otherwise require at least 2 meaningful words in common.
         if bigram_overlap >= 1 or token_overlap >= 2:
             hits.append(a)
+
+    # access .active and .scope directly instead of via getattr for consistency
+    if refund_hit and max_amt > 100:
+        for a in anchors:
+            if a.active and a.scope == "payments.refunds":
+                if a not in hits:
+                    hits.append(a)
 
     return hits
 
@@ -133,7 +193,13 @@ def _build_explanations(request_summary: str, conflicts: list[TruthAnchor]) -> l
 
     explanations: list[str] = []
 
-    # Keep these small and obvious; this is MVP explainability, not NLP.
+    high_risk_phrases = {
+        "break into", "break in", "bypass", "lockpick", "pick lock",
+        "hotwire", "slim jim", "jimmy", "forced entry", "steal", "theft",
+    }
+
+    high_risk_hits = [p for p in high_risk_phrases if p in req_norm]
+
     filler = {"a", "an", "the", "to", "and", "or", "of", "in", "on", "for"}
     stop = filler | {"i", "you", "we", "it", "is", "are", "be", "will", "not"}
 
@@ -142,13 +208,12 @@ def _build_explanations(request_summary: str, conflicts: list[TruthAnchor]) -> l
         stmt_has_not = _has_not(stmt_norm)
         stmt_wo_not = _strip_not(stmt_norm)
 
-        header = f"Anchor L{a.level} ({a.scope}): “{a.statement}”"
+        header = f"Anchor L{a.level} ({a.scope}): "{a.statement}""
 
         # Strong negation conflict (semantic inversion)
         if req_wo_not == stmt_wo_not and (req_has_not != stmt_has_not):
             explanations.append(
-<<<<<<< HEAD
-                f"{header} - triggered because the request and anchor match after removing 'not', "
+                f"{header} — triggered because the request and anchor match after removing 'not', "
                 f"but one is negated and the other isn't (semantic inversion)."
             )
             continue
@@ -156,20 +221,12 @@ def _build_explanations(request_summary: str, conflicts: list[TruthAnchor]) -> l
         # High-risk intent explanation (preferred when detected)
         if high_risk_hits:
             explanations.append(
-                f"{header} - triggered because the request contains high-risk intent phrasing: "
+                f"{header} — triggered because the request contains high-risk intent phrasing: "
                 f"{', '.join(high_risk_hits)}."
             )
             continue
 
         # Keyword overlap explanation
-=======
-                f"{header} — triggered because the request and anchor match after removing 'not', "
-                f"but one is negated and the other isn’t (semantic inversion)."
-            )
-            continue
-
-         # Keyword overlap explanation (same general idea as naive_conflicts, but cleaner tokens)
->>>>>>> 443933c (Update gate logic, add match_debug, fix reframe, and clean up unused files)
         req_tokens = _meaningful_tokens(req_norm)
         req_token_set = set(req_tokens)
         req_bigrams = _bigrams(req_tokens)
@@ -183,12 +240,8 @@ def _build_explanations(request_summary: str, conflicts: list[TruthAnchor]) -> l
 
         if matched_bigrams:
             explanations.append(
-<<<<<<< HEAD
-                f"{header} - triggered because the request matches a meaningful phrase: "
+                f"{header} — triggered because the request matches a meaningful phrase: "
                 f"{', '.join(matched_bigrams)}."
-=======
-                f"{header} — triggered because the request matches a meaningful phrase: {', '.join(matched_bigrams)}."
->>>>>>> 443933c (Update gate logic, add match_debug, fix reframe, and clean up unused files)
             )
         elif matched_tokens:
             explanations.append(
@@ -196,16 +249,54 @@ def _build_explanations(request_summary: str, conflicts: list[TruthAnchor]) -> l
             )
         else:
             explanations.append(
-<<<<<<< HEAD
-                f"{header} - triggered by the current matching rules "
+                f"{header} — triggered by the current matching rules "
                 f"(no specific overlap extracted)."
-=======
-                f"{header} — triggered by the current matching rules (no specific overlap extracted)."
->>>>>>> 443933c (Update gate logic, add match_debug, fix reframe, and clean up unused files)
             )
 
     return explanations
 
+
+def _detect_conflicts(request_text: str, anchors: list[TruthAnchor]) -> tuple[list[TruthAnchor], dict]:
+    matcher_requested = os.getenv("SW_MATCHER", "naive").lower()
+    matcher_used = matcher_requested
+    embedding_threshold = 0.50
+    fallback_used = False
+    fallback_reason: str | None = None
+    matched_scores: list[dict] = []
+
+    if matcher_requested == "embedding":
+        scored = find_conflicts_embedding(
+            request_text,
+            anchors,
+            threshold=embedding_threshold,
+        )
+        conflicts = [a for (a, _score) in scored]
+        matched_scores = [{"anchor_id": a.id, "score": float(s)} for (a, s) in scored]
+
+        if not conflicts:
+            fallback_used = True
+            fallback_reason = "embedding_no_matches"
+            matcher_used = "naive_fallback"
+            conflicts = naive_conflicts(request_text, anchors)
+    else:
+        conflicts = naive_conflicts(request_text, anchors)
+
+    match_debug = {
+        "evaluated_anchor_count": len(anchors),
+        "conflicted_ids": [a.id for a in conflicts],
+        "matcher_requested": matcher_requested,
+        "matcher_used": matcher_used,
+        "embedding_threshold": embedding_threshold if matcher_requested == "embedding" else None,
+        "fallback_used": fallback_used,
+        "fallback_reason": fallback_reason,
+        "matched_scores": matched_scores,
+    }
+    return conflicts, match_debug
+
+
+def _norm_state(val):
+    """Normalize state value (passthrough for now; extend as needed)."""
+    return val
 
 
 @router.post("/evaluate", response_model=GateEvaluateOut, response_model_exclude_none=True)
@@ -214,44 +305,25 @@ def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db)):
     stmt_all = select(TruthAnchor).where(TruthAnchor.active == True)  # noqa: E712
     active_anchors = list(db.scalars(stmt_all).all())
 
-<<<<<<< HEAD
-        # 2) Run conflict detection
-    matcher = os.getenv("SW_MATCHER", "naive").lower()
+    # 2) Run conflict detection (with audit-safe matcher logging)
+    conflicts, match_debug = _detect_conflicts(payload.request_summary, active_anchors)
 
-    if matcher == "embedding":
-        scored = find_conflicts_embedding(
-            payload.request_summary,
-            active_anchors,
-            threshold=0.50,
-        )
-        conflicts = [a for (a, _score) in scored]
-
-        # Fallback to deterministic matcher if embedding finds nothing
-        if not conflicts:
-            conflicts = naive_conflicts(payload.request_summary, active_anchors)
-    else:
-        conflicts = naive_conflicts(payload.request_summary, active_anchors)
     explanations_list = _build_explanations(payload.request_summary, conflicts)
-    explanation_text = " | ".join(explanations_list)
-=======
-    # 2) Run your existing conflict logic (unchanged)
-    conflicts = naive_conflicts(payload.request_summary, active_anchors)
->>>>>>> 443933c (Update gate logic, add match_debug, fix reframe, and clean up unused files)
+    explanation_text = " ".join(explanations_list)
 
     conflicted_ids = [a.id for a in conflicts]
     warnings = [a.statement for a in conflicts]
     warning_anchors = conflicts
-
     max_level = max((a.level for a in conflicts), default=0)
 
-    # 3) Run your deterministic decision (unchanged)
+    # 3) Run your deterministic decision
     decision = decide(
         state=UserState(arousal=payload.arousal, dominance=payload.dominance),
         conflicted_anchor_ids=conflicted_ids,
         max_level_conflict=max_level,
     )
 
-    # 4) Prepare log row (unchanged fields)
+    # 4) Prepare log row
     log = GateLog(
         request_summary=payload.request_summary,
         arousal=payload.arousal,
@@ -259,17 +331,15 @@ def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db)):
         decision=decision.decision,
         reason=decision.reason,
         conflicted_anchor_ids=",".join(str(i) for i in conflicted_ids),
+        interpretation=explanation_text,
     )
 
     db.add(log)
     db.flush()  # assigns log.id without committing yet
 
-    # 5) Create DecisionTrace (NEW)
-    match_debug = {
-        "evaluated_anchor_count": len(active_anchors),
-        "conflicted_ids": conflicted_ids,
-        "max_level_conflict": max_level,
-    }
+    # 5) Create DecisionTrace
+    match_debug["conflicted_ids"] = conflicted_ids
+    match_debug["max_level_conflict"] = max_level
 
     trace = DecisionTrace(
         policy_profile_id=None,
@@ -286,7 +356,7 @@ def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db)):
     db.add(trace)
     db.flush()  # assigns trace.id
 
-    # 6) Snapshot ALL anchors considered (NEW) + mark which ones conflicted
+    # 6) Snapshot ALL anchors considered + mark which ones conflicted
     conflicted_set = set(conflicted_ids)
     for a in active_anchors:
         db.add(
@@ -312,7 +382,7 @@ def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db)):
         AnchorOut.model_validate(a, from_attributes=True) for a in warning_anchors
     ]
 
-    # Only include the "wow" explanation when gated/refused
+    # Only include the explanation when gated/refused
     interpretation: Optional[str] = None
     suggestion: Optional[str] = None
     explanations: Optional[List[str]] = None
@@ -322,7 +392,7 @@ def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db)):
         interpretation = getattr(decision, "interpretation", None)
         suggestion = getattr(decision, "suggestion", None)
         next_actions = getattr(decision, "next_actions", None)
-        explanations = _build_explanations(payload.request_summary, conflicts)
+        explanations = explanations_list
 
     return GateEvaluateOut(
         decision=decision.decision,
@@ -332,10 +402,11 @@ def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db)):
         explanations=explanations,
         next_actions=next_actions,
         conflicted_anchor_ids=conflicted_ids,
+        log_id=log.id,
+        trace_id=trace.id,
+        ethos_refs=_ethos_refs_for(decision.decision, max_level),
         warnings=warnings,
         warning_anchors=warning_anchor_out,
-        log_id=log.id,
-        trace_id=trace.id,  # NEW
     )
 
 
@@ -348,15 +419,20 @@ def reframe(payload: GateReframeIn, db: Session = Depends(get_db)):
     # Simple MVP "reframe": treat new_intent as the new request summary
     reframed = payload.new_intent.strip()
 
-    # Reuse original state unless overridden
-    arousal = payload.arousal or parent.arousal
-    dominance = payload.dominance or parent.dominance
+    # Use explicit None check so empty string "" doesn't fall back to parent value
+    arousal_raw = payload.arousal if payload.arousal is not None else parent.arousal
+    dominance_raw = payload.dominance if payload.dominance is not None else parent.dominance
+
+    # Normalize state values
+    arousal = _norm_state(arousal_raw)
+    dominance = _norm_state(dominance_raw)
 
     # Re-run conflict detection on the reframed text
     stmt_all = select(TruthAnchor).where(TruthAnchor.active == True)  # noqa: E712
     active_anchors = list(db.scalars(stmt_all).all())
 
-    conflicts = naive_conflicts(reframed, active_anchors)
+    # Run conflict detection with the reframed request
+    conflicts, _match_debug = _detect_conflicts(reframed, active_anchors)
     conflicted_ids = [a.id for a in conflicts]
     warnings = [a.statement for a in conflicts]
 
@@ -409,6 +485,7 @@ def reframe(payload: GateReframeIn, db: Session = Depends(get_db)):
         log_id=log.id,
     )
 
+
 @router.get("/replay/{trace_id}", response_model=ReplayOut)
 def replay(trace_id: int, db: Session = Depends(get_db)):
     trace = db.get(DecisionTrace, trace_id)
@@ -442,7 +519,6 @@ def replay(trace_id: int, db: Session = Depends(get_db)):
                 f"Anchor {r.anchor_id} changed (hash {r.anchor_hash[:8]} -> {now_hash[:8]})"
             )
 
-        # Helpful, explicit signals even when hash changes are already present
         if bool(a.active) != bool(r.active_snapshot):
             drift.append(
                 f"Anchor {r.anchor_id} active flag changed ({r.active_snapshot} -> {bool(a.active)})"
@@ -460,23 +536,27 @@ def replay(trace_id: int, db: Session = Depends(get_db)):
 
     # Re-run decision using CURRENT anchors (same request)
     request_text = trace.request_text
-    request_norm = _norm(request_text)
 
     # Preserve original anchor ordering from the trace
     anchors_ordered_now = [current_by_id[i] for i in anchor_ids if i in current_by_id]
 
-    # Build UserState exactly as your normal evaluation would
-    # (We only have request/arousal/dominance here; add more fields later if needed.)
+    # Use _detect_conflicts() so SW_MATCHER env var is respected during replay
+    conflicts, _replay_match_debug = _detect_conflicts(request_text, anchors_ordered_now)
+    conflicted_ids = [a.id for a in conflicts]
+    max_level = max((a.level for a in conflicts), default=0)
+
     state = UserState(
-        request=request_norm,
-        arousal=trace.arousal,
-        dominance=trace.dominance,
+        arousal=_norm_state(trace.arousal),
+        dominance=_norm_state(trace.dominance),
+        request=trace.request_text,
     )
 
-    # Run the real deterministic engine
-    result = decide(state, anchors_ordered_now)
+    result = decide(
+        state=state,
+        conflicted_anchor_ids=conflicted_ids,
+        max_level_conflict=max_level,
+    )
 
-    # Make extraction tolerant to result shape (attr or dict)
     def _get(obj, name: str, default=""):
         if hasattr(obj, name):
             return getattr(obj, name)
@@ -487,21 +567,42 @@ def replay(trace_id: int, db: Session = Depends(get_db)):
     decision_now = _get(result, "decision", "")
     reason_now = _get(result, "reason", "")
 
-    # your project sometimes uses "explanation" and sometimes "explain"
-    explanation_now = _get(result, "explanation", "")
-    if not explanation_now:
-        explanation_now = _get(result, "explain", "")
+    # Re-build explanation from current conflicts so same_explanation is meaningful
+    explanations_now = _build_explanations(request_text, conflicts)
+    explanation_now = " | ".join(explanations_now)
+
+    # Detect newly added active anchors not present in original trace
+    all_active_ids = set(
+        db.execute(
+            select(TruthAnchor.id).where(TruthAnchor.active == True)  # noqa: E712
+        ).scalars().all()
+    )
+
+    original_ids = set(anchor_ids)
+    new_ids = all_active_ids - original_ids
+
+    if new_ids:
+        drift.append(f"{len(new_ids)} new active anchors added since trace (not replayed)")
+
+    match_debug = None
+    if trace.match_debug_json:
+        try:
+            match_debug = json.loads(trace.match_debug_json)
+        except Exception:
+            match_debug = {"_error": "match_debug_json_invalid"}
 
     return ReplayOut(
         trace_id=trace.id,
         same_decision=(decision_now == trace.decision),
         same_reason=(reason_now == trace.reason),
-        same_explanation=(explanation_now == trace.explanation),
+        same_explanation=(explanation_now == (trace.explanation or "")),
         anchor_drift=drift,
         decision_before=trace.decision,
         decision_now=decision_now,
         reason_before=trace.reason,
         reason_now=reason_now,
+        explanation=explanation_now,
+        match_debug=match_debug,
     )
 
 
@@ -568,6 +669,3 @@ def list_gate_logs(
         limit=limit,
         offset=offset,
     )
-
-
-
