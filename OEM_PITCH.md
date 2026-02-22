@@ -98,6 +98,15 @@ Deployment models:
 
 \- Future SDK integration
 
+## Typical Integration Pattern
+
+User Request → SignalWeaver `/gate/evaluate` → Decision + Trace ID →  
+If `proceed` → Downstream system executes  
+If `gate/refuse` → Controlled response returned  
+
+SignalWeaver does not replace business logic.  
+It enforces deterministic policy boundaries before execution.
+
 
 
 ---
