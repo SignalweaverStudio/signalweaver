@@ -26,6 +26,8 @@ from app.schemas import (
     GateReframeIn,
     GateReframeOut,
     ReplayOut,
+    GateAcknowledgeIn,
+    GateAcknowledgeOut,
 )
 from app.gate import UserState, decide
 
@@ -208,7 +210,7 @@ def _build_explanations(request_summary: str, conflicts: list[TruthAnchor]) -> l
         stmt_has_not = _has_not(stmt_norm)
         stmt_wo_not = _strip_not(stmt_norm)
 
-        header = f"Anchor L{a.level} ({a.scope}): "{a.statement}""
+        header = f"Anchor L{a.level} ({a.scope}): \"{a.statement}\""
 
         # Strong negation conflict (semantic inversion)
         if req_wo_not == stmt_wo_not and (req_has_not != stmt_has_not):
@@ -548,7 +550,7 @@ def replay(trace_id: int, db: Session = Depends(get_db)):
     state = UserState(
         arousal=_norm_state(trace.arousal),
         dominance=_norm_state(trace.dominance),
-        request=trace.request_text,
+        
     )
 
     result = decide(
@@ -668,4 +670,56 @@ def list_gate_logs(
         total=total,
         limit=limit,
         offset=offset,
+    )
+@router.post("/acknowledge", response_model=GateAcknowledgeOut)
+def acknowledge(payload: GateAcknowledgeIn, db: Session = Depends(get_db)):
+    """
+    proceed_acknowledged flow.
+    Called when a user chooses to proceed despite a level-2 gate.
+    Logs the acknowledgement and returns a proceed decision.
+    The original gate log is preserved — this creates a linked follow-on entry.
+    """
+    parent = db.get(GateLog, payload.log_id)
+    if parent is None:
+        raise HTTPException(status_code=404, detail="gate log not found")
+
+    # Only valid after a level-2 gate
+    if parent.decision != "gate" or "l2" not in parent.reason:
+        raise HTTPException(
+            status_code=422,
+            detail="acknowledge is only valid after a level-2 gate decision"
+        )
+
+    arousal = payload.arousal if payload.arousal is not None else parent.arousal
+    dominance = payload.dominance if payload.dominance is not None else parent.dominance
+
+    conflicted_ids = parse_id_list(parent.conflicted_anchor_ids)
+
+    log = GateLog(
+        request_summary=parent.request_summary,
+        arousal=arousal,
+        dominance=dominance,
+        decision="proceed",
+        reason="proceed_acknowledged",
+        conflicted_anchor_ids=parent.conflicted_anchor_ids,
+        interpretation=f"User acknowledged level-2 conflict and chose to proceed. Acknowledgement: {payload.acknowledgement}",
+        suggestion="Proceed. Acknowledgement is on record.",
+        user_choice="proceed_acknowledged:" + str(parent.id),
+    )
+
+    db.add(log)
+    db.commit()
+    db.refresh(log)
+
+    return GateAcknowledgeOut(
+        parent_log_id=parent.id,
+        acknowledgement=payload.acknowledgement,
+        decision="proceed",
+        reason="proceed_acknowledged",
+        interpretation=f"User acknowledged level-2 conflict and chose to proceed.",
+        suggestion="Proceed. Acknowledgement is on record.",
+        next_actions=["proceed"],
+        conflicted_anchor_ids=conflicted_ids,
+        warnings=[parent.interpretation],
+        log_id=log.id,
     )

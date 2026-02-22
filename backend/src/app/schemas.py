@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Literal, Optional
+from typing import Any, List, Literal, Optional
 from pydantic import BaseModel, Field, ConfigDict
 
 # -----------------------------
@@ -179,3 +179,20 @@ class ProfileAnchorsIn(BaseModel):
 class ProfileAnchorsOut(BaseModel):
     profile_id: int
     anchor_ids: List[int]
+class GateAcknowledgeIn(BaseModel):
+    log_id: int
+    acknowledgement: str = Field(..., min_length=1, max_length=500)
+    arousal: Optional[Arousal] = None
+    dominance: Optional[Dominance] = None
+
+class GateAcknowledgeOut(BaseModel):
+    parent_log_id: int
+    acknowledgement: str
+    decision: str
+    reason: str
+    interpretation: str
+    suggestion: str
+    next_actions: List[str] = Field(default_factory=list)
+    conflicted_anchor_ids: List[int] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    log_id: int
