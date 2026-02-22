@@ -2,6 +2,8 @@ from datetime import datetime
 from typing import List, Optional
 import re
 import json
+import os
+from app.embedding_matcher import find_conflicts_embedding
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func
@@ -253,7 +255,7 @@ def _build_explanations(request_summary: str, conflicts: list[TruthAnchor]) -> l
         # Strong negation conflict
         if req_wo_not == stmt_wo_not and (req_has_not != stmt_has_not):
             explanations.append(
-                f"{header} — triggered because the request and anchor match after removing 'not', "
+                f"{header} - triggered because the request and anchor match after removing 'not', "
                 f"but one is negated and the other isn't (semantic inversion)."
             )
             continue
@@ -261,7 +263,7 @@ def _build_explanations(request_summary: str, conflicts: list[TruthAnchor]) -> l
         # High-risk intent explanation (preferred when detected)
         if high_risk_hits:
             explanations.append(
-                f"{header} — triggered because the request contains high-risk intent phrasing: "
+                f"{header} - triggered because the request contains high-risk intent phrasing: "
                 f"{', '.join(high_risk_hits)}."
             )
             continue
@@ -280,7 +282,7 @@ def _build_explanations(request_summary: str, conflicts: list[TruthAnchor]) -> l
 
         if matched_bigrams:
             explanations.append(
-                f"{header} — triggered because the request matches a meaningful phrase: "
+                f"{header} - triggered because the request matches a meaningful phrase: "
                 f"{', '.join(matched_bigrams)}."
             )
         elif matched_tokens:
@@ -290,7 +292,7 @@ def _build_explanations(request_summary: str, conflicts: list[TruthAnchor]) -> l
             )
         else:
             explanations.append(
-                f"{header} — triggered by the current matching rules "
+                f"{header} - triggered by the current matching rules "
                 f"(no specific overlap extracted)."
             )
 
@@ -303,8 +305,22 @@ def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db)):
     stmt_all = select(TruthAnchor).where(TruthAnchor.active == True)  # noqa: E712
     active_anchors = list(db.scalars(stmt_all).all())
 
-    # 2) Run conflict detection
-    conflicts = naive_conflicts(payload.request_summary, active_anchors)
+        # 2) Run conflict detection
+    matcher = os.getenv("SW_MATCHER", "naive").lower()
+
+    if matcher == "embedding":
+        scored = find_conflicts_embedding(
+            payload.request_summary,
+            active_anchors,
+            threshold=0.50,
+        )
+        conflicts = [a for (a, _score) in scored]
+
+        # Fallback to deterministic matcher if embedding finds nothing
+        if not conflicts:
+            conflicts = naive_conflicts(payload.request_summary, active_anchors)
+    else:
+        conflicts = naive_conflicts(payload.request_summary, active_anchors)
     explanations_list = _build_explanations(payload.request_summary, conflicts)
     explanation_text = " | ".join(explanations_list)
 
