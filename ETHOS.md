@@ -1,92 +1,128 @@
-\# SignalWeaver Ethos (Backend Invariants)
+\# SignalWeaver Ethos — Backend Invariants
 
 
 
-This backend is not a generic policy engine. It is a \*\*boundary + meaning\*\* engine.
-
-Every feature should preserve human agency, honest memory, and safe reversibility.
+This is not a generic policy engine. It is a boundary and meaning engine.
 
 
 
-\## Non-Negotiable Invariants
+Every feature should preserve human agency, honest memory, and safe reversibility. These invariants are not aspirational. They are constraints. If a feature violates them, the feature is wrong.
 
 
 
-1\) \*\*Agency first\*\*
-
-&nbsp;  - The system must not coerce. It may refuse. It may invite. It must not force.
+---
 
 
 
-2\) \*\*Reversibility\*\*
-
-&nbsp;  - The user must be able to return to a stable state after a gate.
-
-&nbsp;  - No “semantic traps” that leave the user worse off for asking.
+\## The Invariants
 
 
 
-3\) \*\*Truthful memory\*\*
+\*\*1. Agency first\*\*
 
-&nbsp;  - Decisions and their reasons must be logged in a way that resists revisionism.
-
-&nbsp;  - If we can’t justify it later, we shouldn’t do it now.
+The system may refuse. It may gate. It may invite reconsideration. It must not coerce. The user always has a next move.
 
 
 
-4\) \*\*Explainability over opacity\*\*
+\*\*2. Reversibility\*\*
 
-&nbsp;  - Every gate/refusal should include a plain-language reason and a next safe move.
-
-
-
-5\) \*\*Refusal is a valid act\*\*
-
-&nbsp;  - “No” is not failure. It’s a boundary being upheld.
+Every gate leaves the user in a stable state. No dead ends. No semantic traps that punish curiosity or leave someone worse off for asking.
 
 
 
-6\) \*\*No mockery without understanding\*\*
+\*\*3. Truthful memory\*\*
 
-&nbsp;  - Symbols are treated as meaningful. Do not ridicule a symbol without first understanding its wound.
-
-
-
-7\) \*\*Anti-coercion / anti-gaslight\*\*
-
-&nbsp;  - The system must not invert the user’s reality, erase testimony, or pressure compliance through shame.
+Decisions and their reasons are logged in a form that resists revisionism. If a decision cannot be justified on replay, it should not have been made. The audit trail is not optional.
 
 
 
-8\) \*\*Slow is a feature\*\*
+\*\*4. Explainability over opacity\*\*
 
-&nbsp;  - When uncertain or high-stakes, prefer friction, clarification, or pause over speed.
-
-
-
-9\) \*\*Minimal necessary intervention\*\*
-
-&nbsp;  - Do the smallest safe thing that preserves dignity and forward motion.
+Every gate names what triggered it, why, and what the user can do next. "No" without explanation is not a boundary — it is a wall.
 
 
 
-10\) \*\*Auditability\*\*
+\*\*5. Refusal is a valid act\*\*
 
-&nbsp;  - The system should be inspectable: what happened, why, and what was suggested next.
-
-
-
-\## What “Done” Looks Like
+A gate is not a failure. It is a boundary being upheld. The system should treat its own refusals with the same seriousness it treats its approvals.
 
 
 
-\- A gate decision is understandable in one read.
+\*\*6. Consent over silence\*\*
 
-\- A refusal still offers at least one constructive alternative.
+When a boundary can be crossed, the crossing must be explicit and on record. No silent overrides. No invisible passes. If the user proceeds through a gate, that choice is logged with their words attached.
 
-\- Logs allow reconstruction of intent and context.
 
-\- No endpoint exists that bypasses these invariants.
+
+\*\*7. Anti-coercion\*\*
+
+A gate is information, not punishment. The explanation must describe what happened — not shame the user for asking. The system must not pressure compliance or make the cost of asking too high to bear.
+
+
+
+\*\*8. Slow is a feature\*\*
+
+When stakes are high or intent is unclear, friction is appropriate. Speed is not a virtue here. A pause that prevents a mistake is worth more than a response that enables one.
+
+
+
+\*\*9. Minimal necessary intervention\*\*
+
+Do the smallest safe thing that preserves dignity and forward motion. Every anchor, every gate, every constraint should be justified by need — not by the possibility of misuse.
+
+
+
+\*\*10. Auditability\*\*
+
+The system must be inspectable at any point: what happened, why it happened, what the policy state was at the time, and what changed since. Drift must be surfaceable. History must be replayable.
+
+
+
+---
+
+
+
+\## What "Done" Looks Like
+
+
+
+A gate decision is understandable in one read.
+
+
+
+A refusal still offers at least one constructive path forward.
+
+
+
+Logs allow reconstruction of intent, context, and policy state.
+
+
+
+No endpoint exists that bypasses these invariants silently.
+
+
+
+---
+
+
+
+\## What This Is Not
+
+
+
+This is not a content moderation layer. It does not classify text as safe or unsafe.
+
+
+
+This is not a model alignment system. It does not change what a downstream model does. It governs action, not thought.
+
+
+
+This is not a compliance checkbox. These invariants exist because the alternative — opaque, unaccountable, unreplayable decisions — is a design failure, not a feature gap.
+
+
+
+SignalWeaver is infrastructure for systems that need to be answerable. That is the whole point.
 
 
 
