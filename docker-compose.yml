@@ -1,0 +1,9 @@
+services:
+  signalweaver:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - SIGNALWEAVER_DB=/data/signalweaver.db
+    volumes:
+      - ./data:/data
