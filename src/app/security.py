@@ -35,7 +35,10 @@ def rate_limit(request: Request, limit: int = 60, window_s: int = 60) -> None:
     while q and q[0] < cutoff:
         q.popleft()
 
-    
+    # 🔹 Evict empty buckets (prevents memory leak)
+    if not q:
+        del _hits[ip]
+        q = _hits[ip]  # recreate fresh deque for this request
 
     # Enforce limit
     if len(q) >= limit:

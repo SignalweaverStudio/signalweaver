@@ -102,7 +102,8 @@ def update_profile(
     if payload.description is not None:
         profile.description = payload.description
 
-    
+    if payload.parent_id is not None:
+        profile.parent_id = payload.parent_id
 
     # If setting as default, unset previous default (transactionally)
     if payload.is_default is not None and payload.is_default:

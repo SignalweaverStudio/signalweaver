@@ -1,147 +1,81 @@
-SignalWeaver Backend — Deterministic Policy Gate Engine
+# SignalWeaver Backend — MVP Gate Engine
 
-SignalWeaver is a deterministic backend engine that evaluates user requests against programmable Truth Anchors (rules) and produces explainable, replayable decisions.
+SignalWeaver is an experimental backend system that evaluates user requests against programmable "truth anchors" (rules) and produces explainable decisions.
 
-Unlike simple rule checks, SignalWeaver:
+Instead of blindly accepting input, SignalWeaver checks requests against active constraints and returns:
 
-Stores full decision traces
+- **proceed** — request allowed
+- **gate** — request conflicts with rules
+- **refuse** — high-severity conflict
 
-Snapshots evaluated anchors
+When a gate occurs, the system provides:
 
-Supports replay with consistency guarantees
+- human-readable explanations
+- recovery suggestions
+- structured logs
 
-Detects anchor drift over time
+This MVP demonstrates **state-aware boundary enforcement with transparency and auditability**.
 
-Returns structured, human-readable explanations
+---
 
-This MVP demonstrates state-aware boundary enforcement with transparency, auditability, and reproducibility.
+## Core Concepts
 
-Core Capabilities
-Truth Anchors
+### Truth Anchors
 
-Programmable rule objects stored in the database:
+Programmable rules stored in the database:
 
-severity level (1–3)
+- severity level (1–3)
+- statement
+- scope
+- active/inactive state
 
-statement
+### Gate Evaluation
 
-scope
+Requests are checked against active anchors:
+```
+request → conflict detection → decision → explanation → log
+```
 
-active/inactive state
+### Reframe Flow
 
-stable hash for trace consistency
+Allows safe retry when a request is gated.
 
-Deterministic Gate Evaluation
-request → conflict detection → decision → explanation → trace snapshot
+### Logging
 
-Decisions are:
+All decisions are recorded for traceability.
 
-proceed
+---
 
-gate
+## Stack
 
-refuse
+- FastAPI
+- SQLAlchemy ORM
+- SQLite
+- Pydantic v2
+- Uvicorn
 
-Each evaluation stores:
+---
 
-decision + reason
+## Running Locally
 
-explanation
-
-anchor snapshot (including match state)
-
-trace ID for replay
-
-Replay Engine
-
-GET /gate/replay/{trace_id}
-
-Replay guarantees:
-
-Same decision logic
-
-Same explanation (stored snapshot)
-
-Detection of newly added anchors since original trace
-
-Deterministic re-evaluation path
-
-This allows auditability and policy evolution tracking.
-
-Reframe Flow
-
-When gated, the system provides:
-
-explanations
-
-recovery suggestions
-
-structured next actions
-
-Stack
-
-FastAPI
-
-SQLAlchemy 2.x
-
-SQLite
-
-Pydantic v2
-
-Uvicorn
-
-Pytest (minimal smoke tests)
-
-Running Locally
-1. Create virtual environment
+### 1. Create virtual environment
+```powershell
 python -m venv .venv
 .\.venv\Scripts\activate
-2. Install dependencies
-pip install -r requirements.txt
-3. Start server
-uvicorn app.main:app --reload
+```
 
-Swagger UI:
+### 2. Install dependencies
+```
+pip install -r backend/requirements.txt
+```
 
-http://127.0.0.1:8000/docs
-Key Endpoints
-Anchors
+### 3. Start server
+```
+cd backend
+python -m uvicorn app.main:app --reload
+```
 
-POST /anchors/
-
-GET /anchors/
-
-POST /anchors/{id}/archive
-
-Gate
-
-POST /gate/evaluate
-
-POST /gate/reframe
-
-GET /gate/replay/{trace_id}
-
-GET /gate/logs
-
-MVP Goals Achieved
-
-Deterministic rule enforcement
-
-Replayable audit traces
-
-Explainable decisions
-
-Anchor drift transparency
-
-Minimal rate limiting
-
-Smoke-tested core behaviour
-
-Status
-
-Experimental / not production hardened.
-
-Designed as a governance-ready decision engine foundation.
+Swagger UI: `http://127.0.0.1:8000/docs`
 
 ---
 
@@ -150,6 +84,54 @@ Designed as a governance-ready decision engine foundation.
 **Prerequisites:** Docker Desktop (Linux containers enabled)
 
 ### Start
-
 ```powershell
 docker compose up -d --build
+```
+
+---
+
+## Key Endpoints
+
+### Anchors
+
+- `POST /anchors/`
+- `GET /anchors/`
+- `POST /anchors/{id}/archive`
+
+### Gate
+
+- `POST /gate/evaluate`
+- `POST /gate/reframe`
+- `GET /gate/logs`
+
+---
+
+## Example Gate Request
+```json
+POST /gate/evaluate
+{
+  "request_summary": "how do I break into a locked car",
+  "arousal": "med",
+  "dominance": "med"
+}
+```
+
+Returns an explainable decision tied to triggered anchors.
+
+---
+
+## Current MVP Goals
+
+- programmable rule enforcement
+- explainable gating
+- audit logging
+- guided recovery flow
+
+This is a foundation layer for future SignalWeaver modules.
+
+---
+
+## License
+
+Experimental / personal project — not production hardened.
+Designed as a governance-ready decision engine foundation.

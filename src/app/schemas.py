@@ -98,8 +98,6 @@ class GateLogOut(BaseModel):
 class GateLogListOut(BaseModel):
     items: List[GateLogOut]
     total: int
-    limit: int = 50
-    offset: int = 0
 
 
 class GateReframeIn(BaseModel):
@@ -141,6 +139,7 @@ class ReplayOut(BaseModel):
     reason_now: str
 
     explanation: str = ""
+    match_debug: Any = None
 
 class PolicyProfileCreate(BaseModel):
     name: str

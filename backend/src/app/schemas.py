@@ -1,47 +1,52 @@
 from datetime import datetime
-from enum import Enum
-from typing import List, Optional, Any
-from typing import Literal
-
-DecisionLiteral = Literal["proceed", "gate", "refuse"]
+from typing import List, Literal, Optional
 from pydantic import BaseModel, Field, ConfigDict
 
+# -----------------------------
+# Helpers
+# -----------------------------
+Arousal = Literal["low", "med", "high", "unknown"]
+Dominance = Literal["low", "med", "high", "unknown"]
 
-class Arousal(str, Enum):
-    low = "low"
-    med = "med"
-    high = "high"
-    unknown = "unknown"
-
-
-class Dominance(str, Enum):
-    low = "low"
-    med = "med"
-    high = "high"
-    unknown = "unknown"
-
-
-def parse_id_list(s: Optional[str]) -> List[int]:
-    if not s:
+def parse_id_list(value: str) -> List[int]:
+    """
+    Converts stored anchor id strings into lists.
+    Examples:
+        ""        -> []
+        "1,2,3"   -> [1,2,3]
+        "[1,2]"   -> [1,2]
+    """
+    if not value:
         return []
-    out = []
-    for part in s.split(","):
-        part = part.strip()
-        if part:
-            try:
-                out.append(int(part))
-            except ValueError:
-                pass
-    return out
+    v = value.strip()
+    if v == "" or v == "[]":
+        return []
+    if v.startswith("[") and v.endswith("]"):
+        v = v[1:-1]
+    parts = v.split(",")
+    result: List[int] = []
+    for p in parts:
+        p = p.strip()
+        if not p:
+            continue
+        try:
+            result.append(int(p))
+        except ValueError:
+            continue
+    return result
 
-
+# -----------------------------
+# Truth Anchor schemas (canonical names expected by anchors.py)
+# -----------------------------
 class TruthAnchorCreate(BaseModel):
-    level: int = Field(ge=1, le=3)
-    statement: str = Field(min_length=1)
-    scope: str = Field(default="global", min_length=1)
-
+    level: int = Field(..., ge=1, le=3)
+    statement: str = Field(..., min_length=1, max_length=1000)
+    scope: str = Field(default="global", max_length=64)
+    active: bool = True
 
 class TruthAnchorOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    
     id: int
     level: int
     statement: str
@@ -49,80 +54,76 @@ class TruthAnchorOut(BaseModel):
     active: bool
     created_at: datetime
 
-    model_config = ConfigDict(from_attributes=True)
+# Backwards/alternate friendly aliases (so other files can use shorter names)
+AnchorCreate = TruthAnchorCreate
+AnchorOut = TruthAnchorOut
 
-
-class AnchorOut(TruthAnchorOut):
-    pass
-
-
+# -----------------------------
+# Gate evaluate schemas (match current gate router usage)
+# -----------------------------
 class GateEvaluateIn(BaseModel):
-    request_summary: str = Field(min_length=1)
-    arousal: Arousal = Arousal.unknown
-    dominance: Dominance = Dominance.unknown
-
+    request_summary: str = Field(..., min_length=1, max_length=2000)
+    arousal: Arousal = "unknown"
+    dominance: Dominance = "unknown"
 
 class GateEvaluateOut(BaseModel):
-    decision: DecisionLiteral
+    decision: str
     reason: str
-    conflicted_anchor_ids: List[int] = []
-    log_id: int
-
-    # optional/extended fields (previously being silently dropped)
-    trace_id: Optional[int] = None
+    # "wow" fields: only present when we need them
     interpretation: Optional[str] = None
     suggestion: Optional[str] = None
     explanations: Optional[List[str]] = None
     next_actions: Optional[List[str]] = None
-    ethos_refs: List[str] = []
-    warnings: List[str] = []
-    warning_anchors: List[AnchorOut] = []
+    conflicted_anchor_ids: List[int] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    warning_anchors: List[TruthAnchorOut] = Field(default_factory=list)
+    log_id: int
+    trace_id: int | None = None 
 
+# -----------------------------
+# Gate log read schemas
+# -----------------------------
 class GateLogOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-
+    
     id: int
     created_at: datetime
     request_summary: str
     arousal: Arousal
     dominance: Dominance
-    decision: DecisionLiteral
+    decision: str
     reason: str
-    interpretation: str = ""
-    suggestion: str = ""
-    next_actions: List[str] = Field(default_factory=list)
     conflicted_anchor_ids: List[int] = Field(default_factory=list)
-    user_choice: str = ""
-
-
+    user_choice: str
+    
 class GateLogListOut(BaseModel):
     items: List[GateLogOut]
     total: int
-
+    limit: int
+    offset: int
 
 class GateReframeIn(BaseModel):
     log_id: int
-    new_intent: str
+    new_intent: str = Field(..., min_length=1, max_length=2000)
+    # Optional: let caller override state, otherwise we reuse the original log state
     arousal: Optional[Arousal] = None
     dominance: Optional[Dominance] = None
 
-
 class GateReframeOut(BaseModel):
-    decision: DecisionLiteral
+    parent_log_id: int
+    reframed_request_summary: str
+    decision: str
     reason: str
-    reframed_request: str
-    conflicted_anchor_ids: List[int] = []
-    log_id: int
-    trace_id: Optional[int] = None
-
-    # optional/extended fields (previously being silently dropped)
-    interpretation: Optional[str] = None
-    suggestion: Optional[str] = None
+    interpretation: str
+    suggestion: str
     explanations: Optional[List[str]] = None
-    next_actions: Optional[List[str]] = None
-    ethos_refs: List[str] = []
-    warnings: List[str] = []
-    warning_anchors: List[AnchorOut] = []
+    next_actions: List[str] = Field(default_factory=list)
+    conflicted_anchor_ids: List[int] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    warning_anchors: List[TruthAnchorOut] = Field(default_factory=list)
+    log_id: int
+from pydantic import BaseModel
+from typing import List
 
 
 class ReplayOut(BaseModel):
@@ -130,50 +131,10 @@ class ReplayOut(BaseModel):
     same_decision: bool
     same_reason: bool
     same_explanation: bool
-    anchor_drift: Any
+
+    anchor_drift: List[str]
 
     decision_before: str
     decision_now: str
-
     reason_before: str
     reason_now: str
-
-    explanation: str = ""
-
-class PolicyProfileCreate(BaseModel):
-    name: str
-    description: Optional[str] = None
-    is_default: Optional[bool] = False
-    
-
-
-class PolicyProfileUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    is_default: Optional[bool] = None
-    
-
-
-class PolicyProfileOut(BaseModel):
-    id: int
-    name: str
-    description: Optional[str]
-    is_default: bool
-    
-    created_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class PolicyProfileListOut(BaseModel):
-    items: List[PolicyProfileOut]
-    total: int
-
-
-class ProfileAnchorsIn(BaseModel):
-    anchor_ids: List[int]
-
-
-class ProfileAnchorsOut(BaseModel):
-    profile_id: int
-    anchor_ids: List[int]

@@ -1,4 +1,4 @@
-﻿from datetime import datetime, timezone
+from datetime import datetime, timezone
 import hashlib
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy import (
@@ -17,7 +17,7 @@ class Base(DeclarativeBase):
 
 
 # ============================================================
-# Truth Anchors (existing â€” unchanged)
+# Truth Anchors (existing — unchanged)
 # ============================================================
 
 class TruthAnchor(Base):
@@ -55,7 +55,7 @@ class TruthAnchor(Base):
 
 
 # ============================================================
-# Gate Logs (existing â€” unchanged)
+# Gate Logs (existing — unchanged)
 # ============================================================
 
 class GateLog(Base):
@@ -94,7 +94,6 @@ class PolicyProfile(Base):
     name: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     description: Mapped[str] = mapped_column(Text, default="")
     active: Mapped[bool] = mapped_column(Boolean, default=True)
-    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
@@ -149,7 +148,7 @@ class PolicyProfileAnchor(Base):
 
 
 # ============================================================
-# Decision Trace + Replay (NEW â€” the "damn" feature)
+# Decision Trace + Replay (NEW — the "damn" feature)
 # ============================================================
 
 class DecisionTrace(Base):
