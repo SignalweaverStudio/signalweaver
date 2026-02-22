@@ -156,3 +156,5 @@ __marimo__/
 backend/signalweaver.db
 backend/*.db
 backend/.venv/
+
+payload.json
