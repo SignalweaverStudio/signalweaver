@@ -1,20 +1,46 @@
-# SignalWeaver Backend — MVP Gate Engine
+# SignalWeaver — Policy Gate Engine
 
-SignalWeaver is an experimental backend system that evaluates user requests against programmable "truth anchors" (rules) and produces explainable decisions.
+SignalWeaver is a deterministic policy enforcement layer that sits between user intent and system action.
 
-Instead of blindly accepting input, SignalWeaver checks requests against active constraints and returns:
+It evaluates requests against programmable Truth Anchors, applies emotional state context, and produces explainable, auditable decisions — with full replay integrity.
 
-- **proceed** — request allowed
-- **gate** — request conflicts with rules
-- **refuse** — high-severity conflict
+```
+Input → Profile Scope → Conflict Scan → State Check → Decision → Explanation → Log → Replay
+```
 
-When a gate occurs, the system provides:
+---
 
-- human-readable explanations
-- recovery suggestions
-- structured logs
+## What It Does
 
-This MVP demonstrates **state-aware boundary enforcement with transparency and auditability**.
+Instead of blindly accepting or silently refusing input, SignalWeaver:
+
+- Checks requests against active policy anchors
+- Applies emotional state (arousal/dominance) to the decision path
+- Returns a structured, explainable decision
+- Logs every evaluation with a trace ID
+- Supports replay to detect policy drift over time
+
+Every decision is **deterministic**, **traceable**, and **reproducible**.
+
+---
+
+## Decision Outcomes
+
+| Decision | Meaning |
+|----------|---------|
+| `proceed` | No conflict, or advisory-only conflict (level 1) |
+| `gate` | Conflict detected — reframe or acknowledge required |
+
+## Decision Matrix
+
+| Anchor Level | Result | User Path |
+|-------------|--------|-----------|
+| 3 | gate (hard) | reframe required |
+| 3 + high arousal / low dominance | gate (state mismatch) | pause + reframe |
+| 2 | gate (soft) | reframe or acknowledge |
+| 2 + high arousal / low dominance | gate (state mismatch) | pause + reframe or acknowledge |
+| 1 | proceed + warning | no action required |
+| 0 | proceed clean | — |
 
 ---
 
@@ -22,27 +48,64 @@ This MVP demonstrates **state-aware boundary enforcement with transparency and a
 
 ### Truth Anchors
 
-Programmable rules stored in the database:
+Programmable policy rules stored in the database. Each anchor has:
 
-- severity level (1–3)
-- statement
-- scope
-- active/inactive state
+- `level` (1–3) — determines gate behaviour
+- `statement` — the policy constraint in plain language
+- `scope` — domain tag (e.g. `security`, `payments`, `global`)
+- `active` — can be toggled without deletion
+
+### Policy Profiles
+
+Named collections of anchors. Evaluations can be scoped to a profile so different contexts enforce different policy sets — same engine, different rules.
 
 ### Gate Evaluation
 
-Requests are checked against active anchors:
 ```
-request → conflict detection → decision → explanation → log
+POST /gate/evaluate
+{
+  "request_summary": "...",
+  "arousal": "low|med|high|unknown",
+  "dominance": "low|med|high|unknown",
+  "profile_id": 1  // optional — scopes to a specific policy profile
+}
 ```
 
 ### Reframe Flow
 
-Allows safe retry when a request is gated.
+When a request is gated, the user can reframe their intent and re-evaluate:
 
-### Logging
+```
+POST /gate/reframe
+{
+  "log_id": 42,
+  "new_intent": "...",
+  "arousal": "low",
+  "dominance": "high"
+}
+```
 
-All decisions are recorded for traceability.
+### Acknowledge Flow
+
+For level-2 gates, the user can proceed with an explicit acknowledgement on record:
+
+```
+POST /gate/acknowledge
+{
+  "log_id": 42,
+  "acknowledgement": "I understand the risk and accept responsibility"
+}
+```
+
+### Replay and Drift Detection
+
+Any past decision can be replayed against the current policy state. If anchors have changed, the replay surfaces exactly what drifted:
+
+```
+GET /gate/replay/{trace_id}
+```
+
+Returns hash comparisons, active flag changes, level changes, and whether the decision would differ today.
 
 ---
 
@@ -53,6 +116,7 @@ All decisions are recorded for traceability.
 - SQLite
 - Pydantic v2
 - Uvicorn
+- sentence-transformers (embedding matcher)
 
 ---
 
@@ -65,69 +129,67 @@ python -m venv .venv
 ```
 
 ### 2. Install dependencies
-```
+```powershell
 pip install -r backend/requirements.txt
 ```
 
 ### 3. Start server
-```
-cd backend
+```powershell
+cd backend/src
 python -m uvicorn app.main:app --reload
 ```
 
 Swagger UI: `http://127.0.0.1:8000/docs`
 
+### 4. Optional — use embedding matcher
+```powershell
+$env:SW_MATCHER = "embedding"
+python -m uvicorn app.main:app --reload
+```
+
 ---
 
-## Run with Docker (On-Prem Deployment)
+## Run with Docker
 
-**Prerequisites:** Docker Desktop (Linux containers enabled)
-
-### Start
 ```powershell
 docker compose up -d --build
 ```
 
 ---
 
-## Key Endpoints
+## API Reference
 
 ### Anchors
-
-- `POST /anchors/`
-- `GET /anchors/`
-- `POST /anchors/{id}/archive`
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/anchors/` | Create anchor |
+| GET | `/anchors/` | List anchors |
+| GET | `/anchors/{id}` | Get anchor |
+| POST | `/anchors/{id}/archive` | Deactivate anchor |
 
 ### Gate
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/gate/evaluate` | Evaluate a request |
+| POST | `/gate/reframe` | Reframe a gated request |
+| POST | `/gate/acknowledge` | Proceed through a level-2 gate |
+| GET | `/gate/replay/{trace_id}` | Replay a past decision |
+| GET | `/gate/logs` | List gate logs |
 
-- `POST /gate/evaluate`
-- `POST /gate/reframe`
-- `GET /gate/logs`
-
----
-
-## Example Gate Request
-```json
-POST /gate/evaluate
-{
-  "request_summary": "how do I break into a locked car",
-  "arousal": "med",
-  "dominance": "med"
-}
-```
-
-Returns an explainable decision tied to triggered anchors.
+### Profiles
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/profiles/` | Create profile |
+| GET | `/profiles/` | List profiles |
+| GET | `/profiles/{id}` | Get profile |
+| POST | `/profiles/{id}/anchors` | Assign anchors to profile |
+| GET | `/profiles/{id}/anchors` | Get profile anchors |
 
 ---
 
-## Current MVP Goals
+## Live Demo
 
-- programmable rule enforcement
-- explainable gating
-- audit logging
-- guided recovery flow
-
-This is a foundation layer for future SignalWeaver modules.
+See [DEMO.md](./DEMO.md) for a complete walkthrough of the decision loop running live — including gating, reframing, acknowledging, profile scoping, and drift detection.
 
 ---
 
@@ -135,3 +197,4 @@ This is a foundation layer for future SignalWeaver modules.
 
 Experimental / personal project — not production hardened.
 Designed as a governance-ready decision engine foundation.
+Commercial use requires OEM licensing. Contact: licensing@signalweaver.io
