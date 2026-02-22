@@ -65,6 +65,7 @@ class GateEvaluateIn(BaseModel):
     request_summary: str = Field(..., min_length=1, max_length=2000)
     arousal: Arousal = "unknown"
     dominance: Dominance = "unknown"
+    profile_id: Optional[int] = None
 
 class GateEvaluateOut(BaseModel):
     decision: str

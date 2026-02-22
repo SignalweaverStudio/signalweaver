@@ -15,6 +15,8 @@ from app.models import (
     GateLog,
     DecisionTrace,
     DecisionTraceAnchor,
+    PolicyProfile,
+    PolicyProfileAnchor,
 )
 from app.schemas import (
     GateEvaluateIn,
@@ -304,8 +306,25 @@ def _norm_state(val):
 @router.post("/evaluate", response_model=GateEvaluateOut, response_model_exclude_none=True)
 def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db)):
     # 1) Load the anchor set we actually evaluated against
-    stmt_all = select(TruthAnchor).where(TruthAnchor.active == True)  # noqa: E712
-    active_anchors = list(db.scalars(stmt_all).all())
+    if payload.profile_id is not None:
+        profile = db.get(PolicyProfile, payload.profile_id)
+        if not profile:
+            raise HTTPException(status_code=404, detail="Profile not found")
+        rows = list(db.scalars(
+            select(PolicyProfileAnchor)
+            .where(PolicyProfileAnchor.profile_id == payload.profile_id)
+            .where(PolicyProfileAnchor.enabled == True)  # noqa: E712
+            .order_by(PolicyProfileAnchor.priority)
+        ).all())
+        anchor_ids = [r.anchor_id for r in rows]
+        active_anchors = list(db.scalars(
+            select(TruthAnchor)
+            .where(TruthAnchor.id.in_(anchor_ids))
+            .where(TruthAnchor.active == True)  # noqa: E712
+        ).all())
+    else:
+        stmt_all = select(TruthAnchor).where(TruthAnchor.active == True)  # noqa: E712
+        active_anchors = list(db.scalars(stmt_all).all())
 
     # 2) Run conflict detection (with audit-safe matcher logging)
     conflicts, match_debug = _detect_conflicts(payload.request_summary, active_anchors)

@@ -9,6 +9,7 @@ from app.db import engine
 from app.models import Base
 from app.api.anchors import router as anchors_router
 from app.api.gate import router as gate_router
+from app.api.profiles import router as profiles_router
 
 app = FastAPI(title="SignalWeaver MVP")
 
@@ -42,5 +43,6 @@ def tester():
 # so we keep prefixes as they appear in Swagger: /anchors/* and /gate/*
 app.include_router(anchors_router, prefix="/anchors", tags=["anchors"])
 app.include_router(gate_router, prefix="/gate", tags=["gate"])
+app.include_router(profiles_router, prefix="/profiles", tags=["profiles"])
 app.include_router(ethos_router, tags=["ethos"])
 
