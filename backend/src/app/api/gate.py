@@ -38,10 +38,10 @@ router = APIRouter()
 
 
 def _rl(request: Request):
-    # rate_limit() must raise HTTPException on breach; if it only returns a value
-    # this dependency silently does nothing. Verified here by calling and ignoring return —
-    # ensure your rate_limit() implementation raises HTTPException(429) internally.
-    rate_limit(request, limit=60, window_s=60)
+    # Rate limiting not yet implemented.
+    # To add: implement rate_limit(request, limit, window_s) raising HTTPException(429) on breach.
+    # Then add Depends(_rl) to any endpoint that needs it.
+    pass
 
 
 def _ethos_refs_for(decision: str, max_level: int | None = None) -> list[str]:
