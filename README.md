@@ -142,3 +142,14 @@ Status
 Experimental / not production hardened.
 
 Designed as a governance-ready decision engine foundation.
+
+---
+
+## Run with Docker (On-Prem Deployment)
+
+**Prerequisites:** Docker Desktop (Linux containers enabled)
+
+### Start
+
+```powershell
+docker compose up -d --build
