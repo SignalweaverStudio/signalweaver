@@ -349,6 +349,7 @@ def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db)):
     warnings = [a.statement for a in conflicts]
     warning_anchors = conflicts
     max_level = max((a.level for a in conflicts), default=0)
+    l3_count = sum(1 for a in conflicts if a.level >= 3)
 
     # 3) Run decision logic
     decision = decide(
@@ -359,6 +360,7 @@ def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db)):
         ),
         conflicted_anchor_ids=conflicted_ids,
         max_level_conflict=max_level,
+        l3_count=l3_count,
     )
 
     # 4) Prepare log row
@@ -442,6 +444,11 @@ def reframe(payload: GateReframeIn, db: Session = Depends(get_db)):
     parent = db.get(GateLog, payload.log_id)
     if parent is None:
         raise HTTPException(status_code=404, detail="gate log not found")
+    if parent.decision == "refuse":
+        raise HTTPException(
+            status_code=422,
+            detail="Refused decisions cannot be reframed. The intent must change, not the wording.",
+        )
 
     # Simple MVP "reframe": treat new_intent as the new request summary
     reframed = payload.new_intent.strip()
@@ -463,6 +470,7 @@ def reframe(payload: GateReframeIn, db: Session = Depends(get_db)):
     conflicted_ids = [a.id for a in conflicts]
     warnings = [a.statement for a in conflicts]
     max_level = max((a.level for a in conflicts), default=0)
+    l3_count = sum(1 for a in conflicts if a.level >= 3)
 
     # Run decision logic
     decision = decide(
@@ -473,6 +481,7 @@ def reframe(payload: GateReframeIn, db: Session = Depends(get_db)):
         ),
         conflicted_anchor_ids=conflicted_ids,
         max_level_conflict=max_level,
+        l3_count=l3_count,
     )
 
     # Write a new log entry for the reframed attempt
@@ -501,7 +510,7 @@ def reframe(payload: GateReframeIn, db: Session = Depends(get_db)):
 
     return GateReframeOut(
         parent_log_id=parent.id,
-        reframed_request_summary=reframed,
+        reframed_request=reframed,
         decision=decision.decision,
         reason=decision.reason,
         interpretation=getattr(decision, "interpretation", ""),
