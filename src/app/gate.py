@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import List, Literal
 
 
-GateDecisionKind = Literal["proceed", "gate"]
+GateDecisionKind = Literal["proceed", "gate", "refuse"]
 
 
 @dataclass
@@ -33,12 +33,27 @@ def decide(
     state: UserState,
     conflicted_anchor_ids: List[int],
     max_level_conflict: int,
+    l3_count: int = 0,
 ) -> GateDecision:
     """
     Minimal v1.x Gate logic with UI-ready next actions.
     """
 
-    # Level 3+ conflicts are treated as protected constraints
+    # Multiple L3 conflicts: hard refuse — intent must change, not wording
+    if max_level_conflict >= 3 and l3_count >= 2:
+        return GateDecision(
+            decision="refuse",
+            reason="multi_l3_conflict",
+            conflicted_anchor_ids=conflicted_anchor_ids,
+            interpretation=(
+                "Multiple protected constraints are violated simultaneously. "
+                "This action cannot proceed under any framing."
+            ),
+            suggestion="The intent itself conflicts with core policy. Redesign the action, not the wording.",
+            next_actions=["cancel", "view_conflicts"],
+        )
+
+    # Single L3 conflict: gate for review
     if max_level_conflict >= 3:
         if state.arousal == "high" and state.dominance == "low":
             return GateDecision(
