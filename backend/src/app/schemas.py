@@ -1,12 +1,14 @@
 from datetime import datetime
 from typing import Any, List, Literal, Optional
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 
 # -----------------------------
 # Helpers
 # -----------------------------
+Decision = Literal["proceed", "gate", "refuse"]
 Arousal = Literal["low", "med", "high", "unknown"]
 Dominance = Literal["low", "med", "high", "unknown"]
+
 
 def parse_id_list(value: str) -> List[int]:
     """
@@ -35,8 +37,9 @@ def parse_id_list(value: str) -> List[int]:
             continue
     return result
 
+
 # -----------------------------
-# Truth Anchor schemas (canonical names expected by anchors.py)
+# Truth Anchor schemas
 # -----------------------------
 class TruthAnchorCreate(BaseModel):
     level: int = Field(..., ge=1, le=3)
@@ -44,9 +47,10 @@ class TruthAnchorCreate(BaseModel):
     scope: str = Field(default="global", max_length=64)
     active: bool = True
 
+
 class TruthAnchorOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: int
     level: int
     statement: str
@@ -54,12 +58,14 @@ class TruthAnchorOut(BaseModel):
     active: bool
     created_at: datetime
 
-# Backwards/alternate friendly aliases (so other files can use shorter names)
+
+# Backwards/alternate friendly aliases
 AnchorCreate = TruthAnchorCreate
 AnchorOut = TruthAnchorOut
 
+
 # -----------------------------
-# Gate evaluate schemas (match current gate router usage)
+# Gate evaluate schemas
 # -----------------------------
 class GateEvaluateIn(BaseModel):
     request_summary: str = Field(..., min_length=1, max_length=2000)
@@ -67,10 +73,11 @@ class GateEvaluateIn(BaseModel):
     dominance: Dominance = "unknown"
     profile_id: Optional[int] = None
 
+
 class GateEvaluateOut(BaseModel):
-    decision: str
+    decision: Decision
     reason: str
-    # "wow" fields: only present when we need them
+    # "wow" fields: only present when gated/refused
     interpretation: Optional[str] = None
     suggestion: Optional[str] = None
     explanations: Optional[List[str]] = None
@@ -81,27 +88,38 @@ class GateEvaluateOut(BaseModel):
     log_id: int
     trace_id: int | None = None 
 
+
 # -----------------------------
 # Gate log read schemas
 # -----------------------------
 class GateLogOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: int
     created_at: datetime
     request_summary: str
     arousal: Arousal
     dominance: Dominance
-    decision: str
+    decision: Decision
     reason: str
     conflicted_anchor_ids: List[int] = Field(default_factory=list)
     user_choice: str
-    
+
+    @field_validator("conflicted_anchor_ids", mode="before")
+    @classmethod
+    def parse_ids(cls, v: object) -> List[int]:
+        """Accept either a CSV string (from the DB column) or an already-parsed list."""
+        if isinstance(v, str):
+            return parse_id_list(v)
+        return v  # type: ignore[return-value]
+
+
 class GateLogListOut(BaseModel):
     items: List[GateLogOut]
     total: int
     limit: int
     offset: int
+
 
 class GateReframeIn(BaseModel):
     log_id: int
@@ -110,10 +128,11 @@ class GateReframeIn(BaseModel):
     arousal: Optional[Arousal] = None
     dominance: Optional[Dominance] = None
 
+
 class GateReframeOut(BaseModel):
     parent_log_id: int
     reframed_request_summary: str
-    decision: str
+    decision: Decision
     reason: str
     interpretation: str
     suggestion: str
@@ -123,8 +142,6 @@ class GateReframeOut(BaseModel):
     warnings: List[str] = Field(default_factory=list)
     warning_anchors: List[TruthAnchorOut] = Field(default_factory=list)
     log_id: int
-from pydantic import BaseModel
-from typing import List
 
 
 class ReplayOut(BaseModel):
