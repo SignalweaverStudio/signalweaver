@@ -32,6 +32,8 @@ from app.schemas import (
 )
 from app.gate import UserState, decide
 
+from app.auth import get_tenant
+from app.models import Tenant
 
 router = APIRouter()
 
@@ -312,7 +314,7 @@ def _norm_state(val):
     return val
 
 @router.post("/evaluate", response_model=GateEvaluateOut, response_model_exclude_none=True)
-def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db)):
+def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db), tenant: Tenant = Depends(get_tenant)):
     # 1) Load the anchor set we actually evaluated against
     if payload.profile_id is not None:
         profile = db.get(PolicyProfile, payload.profile_id)
@@ -331,7 +333,9 @@ def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db)):
             .where(TruthAnchor.active == True)  # noqa: E712
         ).all())
     else:
-        stmt_all = select(TruthAnchor).where(TruthAnchor.active == True)  # noqa: E712
+        stmt_all = select(TruthAnchor).where(TruthAnchor.active == True).where(  # noqa: E712
+            (TruthAnchor.tenant_id == tenant.id) | (TruthAnchor.tenant_id == None)  # noqa: E711
+        )
         active_anchors = list(db.scalars(stmt_all).all())
 
     # 2) Run conflict detection (with audit-safe matcher logging)

@@ -11,6 +11,7 @@ from app.api.anchors import router as anchors_router
 from app.api.gate import router as gate_router
 from app.api.profiles import router as profiles_router
 from app.api.insight import router as insight_router
+from app.api.tenants import router as tenants_router
 app = FastAPI(title="SignalWeaver MVP")
 
 # Create tables
@@ -46,3 +47,4 @@ app.include_router(gate_router, prefix="/gate", tags=["gate"])
 app.include_router(profiles_router, prefix="/profiles", tags=["profiles"])
 app.include_router(ethos_router, tags=["ethos"])
 app.include_router(insight_router, prefix="/insight", tags=["insight"])
+app.include_router(tenants_router, prefix="/tenants", tags=["tenants"])

@@ -17,6 +17,24 @@ class Base(DeclarativeBase):
 
 
 # ============================================================
+# Tenants (auth + isolation)
+# ============================================================
+
+class Tenant(Base):
+    __tablename__ = "tenants"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    api_key_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+
+# ============================================================
 # Truth Anchors (existing — unchanged)
 # ============================================================
 
@@ -28,6 +46,12 @@ class TruthAnchor(Base):
     statement: Mapped[str] = mapped_column(Text)
     scope: Mapped[str] = mapped_column(String(64), default="global")
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    tenant_id: Mapped[int | None] = mapped_column(
+        ForeignKey("tenants.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
