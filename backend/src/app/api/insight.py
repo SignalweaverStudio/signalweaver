@@ -4,7 +4,7 @@ from sqlalchemy import select, func
 from pydantic import BaseModel
 
 from app.dependencies import get_db
-from app.models import DecisionTrace, GateLog
+from app.models import DecisionTrace, GateLog, TruthAnchor
 
 router = APIRouter()
 
@@ -58,3 +58,112 @@ def summary(db: Session = Depends(get_db)):
         total_overrides=overrides,
         override_rate=override_rate,
     )
+class AnchorOverrideRate(BaseModel):
+    anchor_id: int
+    statement: str
+    total_gates: int
+    overrides: int
+    override_rate: float
+
+
+@router.get("/override-rate", response_model=list[AnchorOverrideRate])
+def override_rate(db: Session = Depends(get_db)):
+
+    gate_rows = db.execute(
+        select(GateLog.conflicted_anchor_ids, GateLog.reason, GateLog.decision)
+        .where(GateLog.conflicted_anchor_ids.is_not(None))
+    ).all()
+
+    totals = {}
+    overrides = {}
+
+    for row in gate_rows:
+        raw_ids = row.conflicted_anchor_ids or ""
+        ids = [int(x.strip()) for x in raw_ids.split(",") if x.strip().isdigit()]
+
+        for anchor_id in ids:
+            if row.decision == "gate":
+                totals[anchor_id] = totals.get(anchor_id, 0) + 1
+            if row.reason == "proceed_acknowledged":
+                overrides[anchor_id] = overrides.get(anchor_id, 0) + 1
+
+    if not totals:
+        return []
+
+
+    anchor_ids = list(totals.keys())
+
+    anchors = db.execute(
+        select(TruthAnchor.id, TruthAnchor.statement).where(TruthAnchor.id.in_(anchor_ids))
+    ).all()
+
+    statement_map = {a.id: a.statement for a in anchors}
+
+    result = []
+
+    for anchor_id, total_gates in totals.items():
+
+        if total_gates < 3:
+            continue
+
+        ov = overrides.get(anchor_id, 0)
+        rate = round((ov / total_gates) * 100, 1) if total_gates > 0 else 0.0
+
+        result.append(
+            AnchorOverrideRate(
+                anchor_id=anchor_id,
+                statement=statement_map.get(anchor_id, "(missing anchor)"),
+                total_gates=total_gates,
+                overrides=ov,
+                override_rate=rate,
+            )
+        )
+
+    result.sort(key=lambda x: x.override_rate, reverse=True)
+
+    return result
+class DeadAnchor(BaseModel):
+    anchor_id: int
+    statement: str
+    priority: int
+    scope: str | None
+    active: bool
+
+
+class DeadAnchor(BaseModel):
+    anchor_id: int
+    statement: str
+
+
+@router.get("/dead-anchors", response_model=list[DeadAnchor])
+def dead_anchors(db: Session = Depends(get_db)):
+
+    matched_ids = set()
+
+    rows = db.execute(
+        select(GateLog.conflicted_anchor_ids)
+        .where(GateLog.conflicted_anchor_ids.is_not(None))
+    ).all()
+
+    for row in rows:
+        raw_ids = row.conflicted_anchor_ids or ""
+        ids = [int(x.strip()) for x in raw_ids.split(",") if x.strip().isdigit()]
+        matched_ids.update(ids)
+
+    anchors = db.execute(
+        select(TruthAnchor.id, TruthAnchor.statement)
+    ).all()
+
+    result = []
+
+    for a in anchors:
+        if a.id not in matched_ids:
+            result.append(
+                DeadAnchor(
+                    anchor_id=a.id,
+                    statement=a.statement,
+                )
+            )
+
+    result.sort(key=lambda x: x.anchor_id)
+    return result
