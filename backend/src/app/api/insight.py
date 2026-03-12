@@ -118,24 +118,42 @@ def override_rate(db: Session = Depends(get_db)):
 
     statement_map = {a.id: a.statement for a in anchors}
 
-    result = []
+    grouped = {}
 
     for anchor_id, total_gates in totals.items():
         if total_gates < 3:
             continue
 
         ov = overrides.get(anchor_id, 0)
-        rate = round((ov / total_gates) * 100, 1) if total_gates > 0 else 0.0
-
         statement = statement_map.get(anchor_id, "(missing anchor)")
 
         if _is_smoke_test_statement(statement):
             continue
 
+        key = statement.strip()
+
+        if key not in grouped:
+            grouped[key] = {
+                "anchor_id": anchor_id,
+                "statement": statement,
+                "total_gates": 0,
+                "overrides": 0,
+            }
+
+        grouped[key]["total_gates"] += total_gates
+        grouped[key]["overrides"] += ov
+
+    result = []
+
+    for item in grouped.values():
+        total_gates = item["total_gates"]
+        ov = item["overrides"]
+        rate = round((ov / total_gates) * 100, 1) if total_gates > 0 else 0.0
+
         result.append(
             AnchorOverrideRate(
-                anchor_id=anchor_id,
-                statement=statement,
+                anchor_id=item["anchor_id"],
+                statement=item["statement"],
                 total_gates=total_gates,
                 overrides=ov,
                 override_rate=rate,
@@ -143,7 +161,6 @@ def override_rate(db: Session = Depends(get_db)):
         )
 
     result.sort(key=lambda x: x.override_rate, reverse=True)
-
     return result
 
 
@@ -223,16 +240,31 @@ def drift(db: Session = Depends(get_db)):
         )
     ).all()
 
-    result = []
+    grouped = {}
+
     for a in anchors:
         if _is_smoke_test_statement(a.statement):
             continue
 
+        key = a.statement.strip()
+
+        if key not in grouped:
+            grouped[key] = {
+                "anchor_id": a.id,
+                "current_statement": a.statement,
+                "appearances": 0,
+            }
+
+        grouped[key]["appearances"] += appearance_counts.get(a.id, 0)
+
+    result = []
+
+    for item in grouped.values():
         result.append(
             DriftAnchor(
-                anchor_id=a.id,
-                current_statement=a.statement,
-                appearances=appearance_counts.get(a.id, 0),
+                anchor_id=item["anchor_id"],
+                current_statement=item["current_statement"],
+                appearances=item["appearances"],
             )
         )
 
