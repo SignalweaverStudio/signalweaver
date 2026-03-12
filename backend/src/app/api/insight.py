@@ -27,6 +27,25 @@ def _is_smoke_test_statement(statement: str | None) -> bool:
     return any(marker in text for marker in smoke_markers)
 
 
+def _clean_statement_text(statement: str | None) -> str:
+    if not statement:
+        return ""
+
+    text = str(statement)
+
+    replacements = {
+        "\u00c2\u00a3": "£",   # Â£
+        "\u00e2\u20ac\u2122": "'",  # â€™
+        "\u00e2\u20ac\u0153": "\u201c",  # â€œ
+        "\u00e2\u20ac\u009d": "\u201d",  # â€
+    }
+
+    for bad, good in replacements.items():
+        text = text.replace(bad, good)
+
+    return text.strip()
+
+
 class DecisionSummary(BaseModel):
     total_decisions: int
     proceed_count: int
@@ -125,7 +144,7 @@ def override_rate(db: Session = Depends(get_db)):
             continue
 
         ov = overrides.get(anchor_id, 0)
-        statement = statement_map.get(anchor_id, "(missing anchor)")
+        statement = _clean_statement_text(statement_map.get(anchor_id, "(missing anchor)"))
 
         if _is_smoke_test_statement(statement):
             continue
@@ -197,12 +216,13 @@ def dead_anchors(db: Session = Depends(get_db)):
         if _is_smoke_test_statement(a.statement):
             continue
 
-        key = a.statement.strip()
+        clean_statement = _clean_statement_text(a.statement)
+        key = clean_statement
 
         if key not in grouped:
             grouped[key] = {
                 "anchor_id": a.id,
-                "statement": a.statement,
+                "statement": clean_statement,
             }
 
     result = []
@@ -260,12 +280,13 @@ def participation(db: Session = Depends(get_db)):
         if _is_smoke_test_statement(a.statement):
             continue
 
-        key = a.statement.strip()
+        clean_statement = _clean_statement_text(a.statement)
+        key = clean_statement
 
         if key not in grouped:
             grouped[key] = {
                 "anchor_id": a.id,
-                "current_statement": a.statement,
+                "current_statement": clean_statement,
                 "appearances": 0,
             }
 
