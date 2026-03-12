@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from app.dependencies import get_db
 from app.models import DecisionTrace, GateLog, TruthAnchor
-
+from typing import List
 router = APIRouter()
 
 
@@ -167,3 +167,116 @@ def dead_anchors(db: Session = Depends(get_db)):
 
     result.sort(key=lambda x: x.anchor_id)
     return result
+class DriftAnchor(BaseModel):
+    anchor_id: int
+    current_statement: str
+    appearances: int
+
+
+@router.get("/drift", response_model=list[DriftAnchor])
+def drift(db: Session = Depends(get_db)):
+
+    matched_ids = []
+
+    rows = db.execute(
+        select(GateLog.conflicted_anchor_ids)
+        .where(GateLog.conflicted_anchor_ids.is_not(None))
+    ).all()
+
+    for row in rows:
+        raw_ids = row.conflicted_anchor_ids or ""
+        ids = [int(x.strip()) for x in raw_ids.split(",") if x.strip().isdigit()]
+        matched_ids.extend(ids)
+
+    if not matched_ids:
+        return []
+
+    appearance_counts = {}
+    for anchor_id in matched_ids:
+        appearance_counts[anchor_id] = appearance_counts.get(anchor_id, 0) + 1
+
+    anchors = db.execute(
+        select(TruthAnchor.id, TruthAnchor.statement).where(
+            TruthAnchor.id.in_(list(appearance_counts.keys()))
+        )
+    ).all()
+
+    result = []
+    for a in anchors:
+        result.append(
+            DriftAnchor(
+                anchor_id=a.id,
+                current_statement=a.statement,
+                appearances=appearance_counts.get(a.id, 0),
+            )
+        )
+
+    result.sort(key=lambda x: x.appearances, reverse=True)
+    return result
+from typing import List
+from pydantic import BaseModel
+
+
+class ProposedAnchorChange(BaseModel):
+    anchor_id: int
+    new_statement: str
+
+
+class CounterfactualIn(BaseModel):
+    trace_ids: List[int]
+    proposed_changes: List[ProposedAnchorChange]
+
+
+class CounterfactualOut(BaseModel):
+    trace_id: int
+    original_decision: str
+    counterfactual_decision: str
+    changed: bool
+
+
+@router.post("/counterfactual", response_model=list[CounterfactualOut])
+def counterfactual(payload: CounterfactualIn, db: Session = Depends(get_db)):
+    results = []
+
+    traces = db.execute(
+        select(DecisionTrace).where(DecisionTrace.id.in_(payload.trace_ids))
+    ).scalars().all()
+
+    change_map = {c.anchor_id: c.new_statement for c in payload.proposed_changes}
+
+    anchors = db.execute(select(TruthAnchor)).scalars().all()
+
+    for trace in traces:
+        trace_text = ""
+
+        if hasattr(trace, "input_text") and trace.input_text:
+            trace_text = trace.input_text
+        elif hasattr(trace, "user_input") and trace.user_input:
+            trace_text = trace.user_input
+        elif hasattr(trace, "request_text") and trace.request_text:
+            trace_text = trace.request_text
+        elif hasattr(trace, "prompt") and trace.prompt:
+            trace_text = trace.prompt
+
+        matched = []
+
+        for anchor in anchors:
+            statement = change_map.get(anchor.id, anchor.statement)
+
+            if statement and trace_text:
+                words = [w.lower() for w in statement.split() if len(w.strip()) > 2]
+                if any(word in trace_text.lower() for word in words):
+                    matched.append(anchor)
+
+        counterfactual_decision = "gate" if matched else "proceed"
+
+        results.append(
+            CounterfactualOut(
+                trace_id=trace.id,
+                original_decision=str(trace.decision),
+                counterfactual_decision=counterfactual_decision,
+                changed=(str(trace.decision) != counterfactual_decision),
+            )
+        )
+
+    return results
