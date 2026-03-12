@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func
 from pydantic import BaseModel
-
+from app.api.gate import _detect_conflicts
 from app.dependencies import get_db
 from app.models import DecisionTrace, GateLog, TruthAnchor
 from typing import List
@@ -243,7 +243,6 @@ def counterfactual(payload: CounterfactualIn, db: Session = Depends(get_db)):
     ).scalars().all()
 
     change_map = {c.anchor_id: c.new_statement for c in payload.proposed_changes}
-
     anchors = db.execute(select(TruthAnchor)).scalars().all()
 
     for trace in traces:
@@ -258,17 +257,15 @@ def counterfactual(payload: CounterfactualIn, db: Session = Depends(get_db)):
         elif hasattr(trace, "prompt") and trace.prompt:
             trace_text = trace.prompt
 
-        matched = []
+        patched_anchors = []
 
         for anchor in anchors:
-            statement = change_map.get(anchor.id, anchor.statement)
+            if anchor.id in change_map:
+                anchor.statement = change_map[anchor.id]
+            patched_anchors.append(anchor)
 
-            if statement and trace_text:
-                words = [w.lower() for w in statement.split() if len(w.strip()) > 2]
-                if any(word in trace_text.lower() for word in words):
-                    matched.append(anchor)
-
-        counterfactual_decision = "gate" if matched else "proceed"
+        conflicts, _debug = _detect_conflicts(trace_text, patched_anchors)
+        counterfactual_decision = "gate" if conflicts else "proceed"
 
         results.append(
             CounterfactualOut(
