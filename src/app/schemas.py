@@ -21,6 +21,12 @@ class Dominance(str, Enum):
     unknown = "unknown"
 
 
+class EnforcementMode(str, Enum):
+    shadow = "shadow"
+    soft = "soft"
+    hard = "hard"
+
+
 def parse_id_list(s: Optional[str]) -> List[int]:
     if not s:
         return []
@@ -60,6 +66,8 @@ class GateEvaluateIn(BaseModel):
     request_summary: str = Field(min_length=1)
     arousal: Arousal = Arousal.unknown
     dominance: Dominance = Dominance.unknown
+    profile_id: Optional[int] = None
+    override_reason: Optional[str] = None
 
 
 class GateEvaluateOut(BaseModel):
@@ -68,7 +76,6 @@ class GateEvaluateOut(BaseModel):
     conflicted_anchor_ids: List[int] = []
     log_id: int
 
-    # optional/extended fields (previously being silently dropped)
     trace_id: Optional[int] = None
     interpretation: Optional[str] = None
     suggestion: Optional[str] = None
@@ -77,6 +84,9 @@ class GateEvaluateOut(BaseModel):
     ethos_refs: List[str] = []
     warnings: List[str] = []
     warning_anchors: List[AnchorOut] = []
+    enforcement_mode: Optional[str] = None
+    would_block: Optional[bool] = None
+
 
 class GateLogOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -115,7 +125,6 @@ class GateReframeOut(BaseModel):
     log_id: int
     trace_id: Optional[int] = None
 
-    # optional/extended fields (previously being silently dropped)
     interpretation: Optional[str] = None
     suggestion: Optional[str] = None
     explanations: Optional[List[str]] = None
@@ -141,18 +150,19 @@ class ReplayOut(BaseModel):
     explanation: str = ""
     match_debug: Any = None
 
+
 class PolicyProfileCreate(BaseModel):
     name: str
     description: Optional[str] = None
     is_default: Optional[bool] = False
-    
+    enforcement_mode: EnforcementMode = EnforcementMode.hard
 
 
 class PolicyProfileUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     is_default: Optional[bool] = None
-    
+    enforcement_mode: Optional[EnforcementMode] = None
 
 
 class PolicyProfileOut(BaseModel):
@@ -160,7 +170,7 @@ class PolicyProfileOut(BaseModel):
     name: str
     description: Optional[str]
     is_default: bool
-    
+    enforcement_mode: str
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -178,3 +188,12 @@ class ProfileAnchorsIn(BaseModel):
 class ProfileAnchorsOut(BaseModel):
     profile_id: int
     anchor_ids: List[int]
+
+
+class ShadowSummaryOut(BaseModel):
+    total_evaluated: int
+    total_l3_conflicts: int
+    total_l2_conflicts: int
+    total_would_block: int
+    total_overrides: int
+    top_triggered_anchors: List[dict]

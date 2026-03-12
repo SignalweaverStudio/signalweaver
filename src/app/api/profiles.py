@@ -14,8 +14,10 @@ from app.schemas import (
     ProfileAnchorsIn,
     ProfileAnchorsOut,
 )
+
 def _rl(request: Request):
     rate_limit(request, limit=60, window_s=60)
+
 router = APIRouter(
     dependencies=[Depends(verify_api_key), Depends(_rl)]
 )
@@ -23,8 +25,6 @@ router = APIRouter(
 
 @router.post("", response_model=PolicyProfileOut, status_code=201)
 def create_profile(payload: PolicyProfileCreate, db: Session = Depends(get_db)):
-    """Create a new policy profile."""
-    # Check name uniqueness
     existing = db.scalar(
         select(PolicyProfile).where(PolicyProfile.name == payload.name)
     )
@@ -34,7 +34,6 @@ def create_profile(payload: PolicyProfileCreate, db: Session = Depends(get_db)):
             detail=f"Profile with name '{payload.name}' already exists",
         )
 
-    # If setting as default, unset previous default (transactionally)
     if payload.is_default:
         for prof in db.scalars(
             select(PolicyProfile).where(PolicyProfile.is_default == True)  # noqa: E712
@@ -45,7 +44,7 @@ def create_profile(payload: PolicyProfileCreate, db: Session = Depends(get_db)):
         name=payload.name,
         description=payload.description,
         is_default=payload.is_default or False,
-        
+        enforcement_mode=payload.enforcement_mode.value,
     )
 
     db.add(profile)
@@ -57,7 +56,6 @@ def create_profile(payload: PolicyProfileCreate, db: Session = Depends(get_db)):
 
 @router.get("", response_model=PolicyProfileListOut)
 def list_profiles(db: Session = Depends(get_db)):
-    """List all policy profiles."""
     profiles = list(db.scalars(select(PolicyProfile)).all())
     return PolicyProfileListOut(
         items=[
@@ -69,7 +67,6 @@ def list_profiles(db: Session = Depends(get_db)):
 
 @router.get("/{profile_id}", response_model=PolicyProfileOut)
 def get_profile(profile_id: int, db: Session = Depends(get_db)):
-    """Get a single policy profile by ID."""
     profile = db.get(PolicyProfile, profile_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
@@ -82,12 +79,10 @@ def update_profile(
     payload: PolicyProfileUpdate,
     db: Session = Depends(get_db),
 ):
-    """Update a policy profile."""
     profile = db.get(PolicyProfile, profile_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
 
-    # Check name uniqueness if changing name
     if payload.name is not None and payload.name != profile.name:
         existing = db.scalar(
             select(PolicyProfile).where(PolicyProfile.name == payload.name)
@@ -102,10 +97,9 @@ def update_profile(
     if payload.description is not None:
         profile.description = payload.description
 
-    if payload.parent_id is not None:
-        profile.parent_id = payload.parent_id
+    if payload.enforcement_mode is not None:
+        profile.enforcement_mode = payload.enforcement_mode.value
 
-    # If setting as default, unset previous default (transactionally)
     if payload.is_default is not None and payload.is_default:
         for prof in db.scalars(
             select(PolicyProfile).where(PolicyProfile.is_default == True)  # noqa: E712
@@ -122,10 +116,6 @@ def update_profile(
 
 @router.delete("/{profile_id}", status_code=204)
 def delete_profile(profile_id: int, db: Session = Depends(get_db)):
-    """
-    Delete a policy profile.
-    Rule: Cannot delete the default profile. Set another profile as default first.
-    """
     profile = db.get(PolicyProfile, profile_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
@@ -142,7 +132,6 @@ def delete_profile(profile_id: int, db: Session = Depends(get_db)):
 
 @router.get("/{profile_id}/anchors", response_model=ProfileAnchorsOut)
 def get_profile_anchors(profile_id: int, db: Session = Depends(get_db)):
-    """Get all anchors assigned to a profile."""
     profile = db.get(PolicyProfile, profile_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
@@ -157,14 +146,10 @@ def set_profile_anchors(
     payload: ProfileAnchorsIn,
     db: Session = Depends(get_db),
 ):
-    """
-    Replace entire anchor set for a profile (deterministic, transactional).
-    """
     profile = db.get(PolicyProfile, profile_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
 
-    # Validate all anchor IDs exist
     if payload.anchor_ids:
         existing_ids = set(
             db.scalars(
@@ -178,20 +163,16 @@ def set_profile_anchors(
                 detail=f"Anchor IDs not found: {sorted(missing)}",
             )
 
-    # Clear existing associations
     db.execute(
-    delete(PolicyProfileAnchor).where(
-        PolicyProfileAnchor.profile_id == profile_id
+        delete(PolicyProfileAnchor).where(
+            PolicyProfileAnchor.profile_id == profile_id
+        )
     )
-)
 
-    # Add new associations
     for anchor_id in payload.anchor_ids:
         db.add(PolicyProfileAnchor(profile_id=profile_id, anchor_id=anchor_id))
 
     db.commit()
-
-    # Return updated list
     db.refresh(profile)
     anchor_ids = [a.id for a in profile.anchors]
     return ProfileAnchorsOut(profile_id=profile_id, anchor_ids=anchor_ids)
