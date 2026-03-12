@@ -219,14 +219,15 @@ def dead_anchors(db: Session = Depends(get_db)):
     return result
 
 
-class DriftAnchor(BaseModel):
+class ParticipationAnchor(BaseModel):
     anchor_id: int
     current_statement: str
     appearances: int
 
 
-@router.get("/drift", response_model=list[DriftAnchor])
-def drift(db: Session = Depends(get_db)):
+@router.get("/participation", response_model=list[ParticipationAnchor])
+@router.get("/drift", response_model=list[ParticipationAnchor])
+def participation(db: Session = Depends(get_db)):
 
     matched_ids = []
 
@@ -274,7 +275,7 @@ def drift(db: Session = Depends(get_db)):
 
     for item in grouped.values():
         result.append(
-            DriftAnchor(
+            ParticipationAnchor(
                 anchor_id=item["anchor_id"],
                 current_statement=item["current_statement"],
                 appearances=item["appearances"],
@@ -289,7 +290,7 @@ class InsightReport(BaseModel):
     summary: DecisionSummary
     override_rate: list[AnchorOverrideRate]
     dead_anchors: list[DeadAnchor]
-    drift: list[DriftAnchor]
+    participation: list[ParticipationAnchor]
 
 
 class ProposedAnchorChange(BaseModel):
@@ -359,11 +360,11 @@ def report(db: Session = Depends(get_db)):
     summary_data = summary(db)
     override_data = override_rate(db)
     dead_anchor_data = dead_anchors(db)
-    drift_data = drift(db)
+    participation_data = participation(db)
 
     return InsightReport(
         summary=summary_data,
         override_rate=override_data,
         dead_anchors=dead_anchor_data,
-        drift=drift_data,
+        participation=participation_data,
     )
