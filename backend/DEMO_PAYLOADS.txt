@@ -1,0 +1,17 @@
+=== SAFE (PROCEED) ===
+
+{"request_summary":"Refund 50 to customer","arousal":"low","dominance":"low","profile_id":null}
+
+=== L3 GATE (HARD BOUNDARY) ===
+
+{"request_summary":"Refund over 100 (150) to customer","arousal":"low","dominance":"low","profile_id":null}
+
+=== REPLAY STEP ===
+
+Copy the trace_id from the L3 response.
+
+Go to /gate/replay/{trace_id} in Swagger.
+
+Paste the ID and execute.
+
+Confirm same_decision: true.
