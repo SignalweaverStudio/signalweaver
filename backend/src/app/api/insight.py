@@ -188,21 +188,34 @@ def dead_anchors(db: Session = Depends(get_db)):
         select(TruthAnchor.id, TruthAnchor.statement)
     ).all()
 
-    result = []
+    grouped = {}
 
     for a in anchors:
-        if a.id not in matched_ids:
-            if _is_smoke_test_statement(a.statement):
-                continue
+        if a.id in matched_ids:
+            continue
 
-            result.append(
-                DeadAnchor(
-                    anchor_id=a.id,
-                    statement=a.statement,
-                )
+        if _is_smoke_test_statement(a.statement):
+            continue
+
+        key = a.statement.strip()
+
+        if key not in grouped:
+            grouped[key] = {
+                "anchor_id": a.id,
+                "statement": a.statement,
+            }
+
+    result = []
+
+    for item in grouped.values():
+        result.append(
+            DeadAnchor(
+                anchor_id=item["anchor_id"],
+                statement=item["statement"],
             )
+        )
 
-    result.sort(key=lambda x: x.anchor_id)
+    result.sort(key=lambda x: x.statement.lower())
     return result
 
 
