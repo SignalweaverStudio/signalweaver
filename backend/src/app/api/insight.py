@@ -58,6 +58,8 @@ def summary(db: Session = Depends(get_db)):
         total_overrides=overrides,
         override_rate=override_rate,
     )
+
+
 class AnchorOverrideRate(BaseModel):
     anchor_id: int
     statement: str
@@ -90,7 +92,6 @@ def override_rate(db: Session = Depends(get_db)):
     if not totals:
         return []
 
-
     anchor_ids = list(totals.keys())
 
     anchors = db.execute(
@@ -122,12 +123,6 @@ def override_rate(db: Session = Depends(get_db)):
     result.sort(key=lambda x: x.override_rate, reverse=True)
 
     return result
-class DeadAnchor(BaseModel):
-    anchor_id: int
-    statement: str
-    priority: int
-    scope: str | None
-    active: bool
 
 
 class DeadAnchor(BaseModel):
@@ -167,6 +162,8 @@ def dead_anchors(db: Session = Depends(get_db)):
 
     result.sort(key=lambda x: x.anchor_id)
     return result
+
+
 class DriftAnchor(BaseModel):
     anchor_id: int
     current_statement: str
@@ -213,6 +210,15 @@ def drift(db: Session = Depends(get_db)):
 
     result.sort(key=lambda x: x.appearances, reverse=True)
     return result
+
+
+class InsightReport(BaseModel):
+    summary: DecisionSummary
+    override_rate: list[AnchorOverrideRate]
+    dead_anchors: list[DeadAnchor]
+    drift: list[DriftAnchor]
+
+
 from typing import List
 from pydantic import BaseModel
 
@@ -277,3 +283,18 @@ def counterfactual(payload: CounterfactualIn, db: Session = Depends(get_db)):
         )
 
     return results
+
+
+@router.get("/report", response_model=InsightReport)
+def report(db: Session = Depends(get_db)):
+    summary_data = summary(db)
+    override_data = override_rate(db)
+    dead_anchor_data = dead_anchors(db)
+    drift_data = drift(db)
+
+    return InsightReport(
+        summary=summary_data,
+        override_rate=override_data,
+        dead_anchors=dead_anchor_data,
+        drift=drift_data,
+    )
