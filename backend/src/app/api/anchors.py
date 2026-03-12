@@ -17,6 +17,7 @@ def create_anchor(payload: TruthAnchorCreate, db: Session = Depends(get_db)):
     db.refresh(anchor)
     return anchor
 
+
 @router.get("/", response_model=list[TruthAnchorOut])
 def list_anchors(active_only: bool = True, db: Session = Depends(get_db)):
     stmt = select(TruthAnchor)
@@ -24,6 +25,15 @@ def list_anchors(active_only: bool = True, db: Session = Depends(get_db)):
         stmt = stmt.where(TruthAnchor.active == True)  # noqa: E712
     stmt = stmt.order_by(TruthAnchor.created_at.desc())
     return list(db.scalars(stmt).all())
+
+
+@router.get("/{anchor_id}", response_model=TruthAnchorOut)
+def get_anchor(anchor_id: int, db: Session = Depends(get_db)):
+    anchor = db.get(TruthAnchor, anchor_id)
+    if not anchor:
+        raise HTTPException(status_code=404, detail="Anchor not found")
+    return anchor
+
 
 @router.post("/{anchor_id}/archive", response_model=TruthAnchorOut)
 def archive_anchor(anchor_id: int, db: Session = Depends(get_db)):
@@ -34,15 +44,3 @@ def archive_anchor(anchor_id: int, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(anchor)
     return anchor
-
-
-
-@router.get("/{anchor_id}", response_model=TruthAnchorOut)
-def get_anchor(anchor_id: int, db: Session = Depends(get_db)):
-    anchor = db.get(TruthAnchor, anchor_id)
-
-    if not anchor:
-        raise HTTPException(status_code=404, detail="Anchor not found")
-
-    return anchor
-

@@ -582,6 +582,7 @@ def replay(trace_id: int, db: Session = Depends(get_db)):
     conflicts, _replay_match_debug = _detect_conflicts(request_text, anchors_ordered_now)
     conflicted_ids = [a.id for a in conflicts]
     max_level = max((a.level for a in conflicts), default=0)
+    l3_count = sum(1 for a in conflicts if a.level >= 3)
 
     state = UserState(
         arousal=_norm_state(trace.arousal),
@@ -593,6 +594,7 @@ def replay(trace_id: int, db: Session = Depends(get_db)):
         state=state,
         conflicted_anchor_ids=conflicted_ids,
         max_level_conflict=max_level,
+        l3_count=l3_count,
     )
 
     def _get(obj, name: str, default=""):

@@ -23,7 +23,6 @@ from app.schemas import (
     GateEvaluateOut,
     GateLogOut,
     GateLogListOut,
-    parse_id_list,
     AnchorOut,
     GateReframeIn,
     GateReframeOut,
@@ -36,6 +35,11 @@ from app.gate import UserState, decide
 
 router = APIRouter()
 
+# ---------------------------------------------------------------------------
+# Text-matching constants (shared by naive_conflicts and _build_explanations)
+# ---------------------------------------------------------------------------
+_FILLER = {"a", "an", "the", "to", "and", "or", "of", "in", "on", "for"}
+_STOP = _FILLER | {"i", "you", "we", "it", "is", "are", "be", "will", "not"}
 
 def _rl(request: Request):
     # Rate limiting not yet implemented.
@@ -68,6 +72,9 @@ def _ethos_refs_for(decision: str, max_level: int | None = None) -> list[str]:
             out.append(r)
     return out
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def _norm(s: str) -> str:
     return " ".join(s.strip().lower().split())
@@ -151,6 +158,7 @@ def naive_conflicts(request_summary: str, anchors: list[TruthAnchor]) -> list[Tr
     refund_hit = _has_refund_word(request_summary)
     max_amt = _max_money_amount(request_summary)
 
+
     hits: list[TruthAnchor] = []
 
     for a in anchors:
@@ -185,11 +193,11 @@ def naive_conflicts(request_summary: str, anchors: list[TruthAnchor]) -> list[Tr
 
 def _build_explanations(request_summary: str, conflicts: list[TruthAnchor]) -> list[str]:
     """
-    Create plain-English per-anchor explanations for why each anchor was flagged.
+    Plain-English per-anchor explanations for why each anchor was flagged.
 
-    This is intentionally lightweight and transparent:
-    - If we hit the "strong negation conflict", explain that.
-    - Otherwise, explain that there was keyword overlap and show which words matched.
+    Intentionally lightweight and transparent:
+    - Negation conflicts get a semantic-inversion note.
+    - Keyword overlaps list the matching tokens.
     """
     req_norm = _norm(request_summary)
     req_has_not = _has_not(req_norm)
@@ -207,6 +215,7 @@ def _build_explanations(request_summary: str, conflicts: list[TruthAnchor]) -> l
     filler = {"a", "an", "the", "to", "and", "or", "of", "in", "on", "for"}
     stop = filler | {"i", "you", "we", "it", "is", "are", "be", "will", "not"}
 
+
     for a in conflicts:
         stmt_norm = _norm(a.statement)
         stmt_has_not = _has_not(stmt_norm)
@@ -214,7 +223,7 @@ def _build_explanations(request_summary: str, conflicts: list[TruthAnchor]) -> l
 
         header = f"Anchor L{a.level} ({a.scope}): \"{a.statement}\""
 
-        # Strong negation conflict (semantic inversion)
+        # Strong negation conflict
         if req_wo_not == stmt_wo_not and (req_has_not != stmt_has_not):
             explanations.append(
                 f"{header} — triggered because the request and anchor match after removing 'not', "
@@ -302,7 +311,6 @@ def _norm_state(val):
     """Normalize state value (passthrough for now; extend as needed)."""
     return val
 
-
 @router.post("/evaluate", response_model=GateEvaluateOut, response_model_exclude_none=True)
 def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db)):
     # 1) Load the anchor set we actually evaluated against
@@ -336,12 +344,14 @@ def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db)):
     warnings = [a.statement for a in conflicts]
     warning_anchors = conflicts
     max_level = max((a.level for a in conflicts), default=0)
+    num_l3 = sum(1 for a in conflicts if a.level >= 3)
 
     # 3) Run your deterministic decision
     decision = decide(
         state=UserState(arousal=payload.arousal, dominance=payload.dominance),
         conflicted_anchor_ids=conflicted_ids,
         max_level_conflict=max_level,
+        num_l3_conflicts=num_l3,
     )
 
     # 4) Prepare log row
@@ -354,7 +364,6 @@ def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db)):
         conflicted_anchor_ids=",".join(str(i) for i in conflicted_ids),
         interpretation=explanation_text,
     )
-
     db.add(log)
     db.flush()  # assigns log.id without committing yet
 
@@ -398,10 +407,7 @@ def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(log)
 
-    # Convert ORM anchors -> schema objects for response stability
-    warning_anchor_out = [
-        AnchorOut.model_validate(a, from_attributes=True) for a in warning_anchors
-    ]
+    warning_anchor_out = [AnchorOut.model_validate(a, from_attributes=True) for a in conflicts]
 
     # Only include the explanation when gated/refused
     interpretation: Optional[str] = None
@@ -437,7 +443,6 @@ def reframe(payload: GateReframeIn, db: Session = Depends(get_db)):
     if parent is None:
         raise HTTPException(status_code=404, detail="gate log not found")
 
-    # Simple MVP "reframe": treat new_intent as the new request summary
     reframed = payload.new_intent.strip()
 
     # Use explicit None check so empty string "" doesn't fall back to parent value
@@ -448,7 +453,6 @@ def reframe(payload: GateReframeIn, db: Session = Depends(get_db)):
     arousal = _norm_state(arousal_raw)
     dominance = _norm_state(dominance_raw)
 
-    # Re-run conflict detection on the reframed text
     stmt_all = select(TruthAnchor).where(TruthAnchor.active == True)  # noqa: E712
     active_anchors = list(db.scalars(stmt_all).all())
 
@@ -456,16 +460,16 @@ def reframe(payload: GateReframeIn, db: Session = Depends(get_db)):
     conflicts, _match_debug = _detect_conflicts(reframed, active_anchors)
     conflicted_ids = [a.id for a in conflicts]
     warnings = [a.statement for a in conflicts]
-
     max_level = max((a.level for a in conflicts), default=0)
+    num_l3 = sum(1 for a in conflicts if a.level >= 3)
 
     decision = decide(
         state=UserState(arousal=arousal, dominance=dominance),
         conflicted_anchor_ids=conflicted_ids,
         max_level_conflict=max_level,
+        num_l3_conflicts=num_l3,
     )
 
-    # Write a new log entry for the reframed attempt
     log = GateLog(
         request_summary=reframed,
         arousal=arousal,
@@ -477,16 +481,12 @@ def reframe(payload: GateReframeIn, db: Session = Depends(get_db)):
         conflicted_anchor_ids=",".join(str(i) for i in conflicted_ids),
         user_choice="reframe_from:" + str(parent.id),
     )
-
     db.add(log)
     db.commit()
     db.refresh(log)
 
-    warning_anchor_out = [
-        AnchorOut.model_validate(a, from_attributes=True) for a in conflicts
-    ]
+    warning_anchor_out = [AnchorOut.model_validate(a, from_attributes=True) for a in conflicts]
 
-    # Only include explanations when not proceed (keeps responses tidy)
     explanations: Optional[List[str]] = None
     if decision.decision != "proceed":
         explanations = _build_explanations(reframed, conflicts)
@@ -664,25 +664,10 @@ def list_gate_logs(
     stmt = select(GateLog)
     if base_where:
         stmt = stmt.where(*base_where)
-
     stmt = stmt.order_by(GateLog.id.desc()).limit(limit).offset(offset)
     rows = list(db.scalars(stmt).all())
 
-    items = []
-    for r in rows:
-        items.append(
-            GateLogOut(
-                id=r.id,
-                created_at=r.created_at,
-                request_summary=r.request_summary,
-                arousal=r.arousal,
-                dominance=r.dominance,
-                decision=r.decision,
-                reason=r.reason,
-                conflicted_anchor_ids=parse_id_list(r.conflicted_anchor_ids),
-                user_choice=r.user_choice,
-            )
-        )
+    items = [GateLogOut.model_validate(r) for r in rows]
 
     return GateLogListOut(
         items=items,
@@ -742,3 +727,11 @@ def acknowledge(payload: GateAcknowledgeIn, db: Session = Depends(get_db)):
         warnings=[parent.interpretation],
         log_id=log.id,
     )
+
+
+@router.get("/logs/{log_id}", response_model=GateLogOut)
+def get_gate_log(log_id: int, db: Session = Depends(get_db)):
+    row = db.get(GateLog, log_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="gate log not found")
+    return GateLogOut.model_validate(row)
