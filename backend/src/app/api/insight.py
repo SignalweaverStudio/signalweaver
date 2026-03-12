@@ -6,7 +6,25 @@ from app.api.gate import _detect_conflicts
 from app.dependencies import get_db
 from app.models import DecisionTrace, GateLog, TruthAnchor
 from typing import List
+
 router = APIRouter()
+
+
+def _is_smoke_test_statement(statement: str | None) -> bool:
+    if not statement:
+        return False
+
+    text = statement.lower()
+    smoke_markers = [
+        "smoke test",
+        "smoke wall",
+        "smoke overflow",
+        "smoke vault",
+        "smoke locker",
+        "flubnort",
+        "zorbix",
+    ]
+    return any(marker in text for marker in smoke_markers)
 
 
 class DecisionSummary(BaseModel):
@@ -103,17 +121,21 @@ def override_rate(db: Session = Depends(get_db)):
     result = []
 
     for anchor_id, total_gates in totals.items():
-
         if total_gates < 3:
             continue
 
         ov = overrides.get(anchor_id, 0)
         rate = round((ov / total_gates) * 100, 1) if total_gates > 0 else 0.0
 
+        statement = statement_map.get(anchor_id, "(missing anchor)")
+
+        if _is_smoke_test_statement(statement):
+            continue
+
         result.append(
             AnchorOverrideRate(
                 anchor_id=anchor_id,
-                statement=statement_map.get(anchor_id, "(missing anchor)"),
+                statement=statement,
                 total_gates=total_gates,
                 overrides=ov,
                 override_rate=rate,
@@ -153,6 +175,9 @@ def dead_anchors(db: Session = Depends(get_db)):
 
     for a in anchors:
         if a.id not in matched_ids:
+            if _is_smoke_test_statement(a.statement):
+                continue
+
             result.append(
                 DeadAnchor(
                     anchor_id=a.id,
@@ -200,6 +225,9 @@ def drift(db: Session = Depends(get_db)):
 
     result = []
     for a in anchors:
+        if _is_smoke_test_statement(a.statement):
+            continue
+
         result.append(
             DriftAnchor(
                 anchor_id=a.id,
@@ -217,10 +245,6 @@ class InsightReport(BaseModel):
     override_rate: list[AnchorOverrideRate]
     dead_anchors: list[DeadAnchor]
     drift: list[DriftAnchor]
-
-
-from typing import List
-from pydantic import BaseModel
 
 
 class ProposedAnchorChange(BaseModel):
