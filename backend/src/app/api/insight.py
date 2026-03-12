@@ -2,7 +2,9 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func
 from pydantic import BaseModel
+from dataclasses import dataclass
 from app.api.gate import _detect_conflicts
+from app.gate import decide, UserState
 from app.dependencies import get_db
 from app.models import DecisionTrace, GateLog, TruthAnchor
 from typing import List
@@ -331,6 +333,15 @@ class CounterfactualOut(BaseModel):
     changed: bool
 
 
+@dataclass
+class _PatchedAnchor:
+    id: int
+    level: int
+    statement: str
+    scope: str
+    active: bool
+
+
 @router.post("/counterfactual", response_model=list[CounterfactualOut])
 def counterfactual(payload: CounterfactualIn, db: Session = Depends(get_db)):
     results = []
@@ -340,41 +351,44 @@ def counterfactual(payload: CounterfactualIn, db: Session = Depends(get_db)):
     ).scalars().all()
 
     change_map = {c.anchor_id: c.new_statement for c in payload.proposed_changes}
-    anchors = db.execute(select(TruthAnchor)).scalars().all()
+
+    # Build patched copies — never mutate live session objects
+    live_anchors = db.execute(select(TruthAnchor)).scalars().all()
+
+    patched_anchors = [
+        _PatchedAnchor(
+            id=a.id,
+            level=a.level,
+            statement=change_map.get(a.id, a.statement),
+            scope=a.scope,
+            active=bool(a.active),
+        )
+        for a in live_anchors
+    ]
 
     for trace in traces:
-        trace_text = ""
+        conflicts, _debug = _detect_conflicts(trace.request_text, patched_anchors)
+        conflicted_ids = [a.id for a in conflicts]
+        max_level = max((a.level for a in conflicts), default=0)
+        num_l3 = sum(1 for a in conflicts if a.level >= 3)
 
-        if hasattr(trace, "input_text") and trace.input_text:
-            trace_text = trace.input_text
-        elif hasattr(trace, "user_input") and trace.user_input:
-            trace_text = trace.user_input
-        elif hasattr(trace, "request_text") and trace.request_text:
-            trace_text = trace.request_text
-        elif hasattr(trace, "prompt") and trace.prompt:
-            trace_text = trace.prompt
-
-        patched_anchors = []
-
-        for anchor in anchors:
-            if anchor.id in change_map:
-                anchor.statement = change_map[anchor.id]
-            patched_anchors.append(anchor)
-
-        conflicts, _debug = _detect_conflicts(trace_text, patched_anchors)
-        counterfactual_decision = "gate" if conflicts else "proceed"
+        result = decide(
+            state=UserState(arousal=trace.arousal, dominance=trace.dominance),
+            conflicted_anchor_ids=conflicted_ids,
+            max_level_conflict=max_level,
+            num_l3_conflicts=num_l3,
+        )
 
         results.append(
             CounterfactualOut(
                 trace_id=trace.id,
                 original_decision=str(trace.decision),
-                counterfactual_decision=counterfactual_decision,
-                changed=(str(trace.decision) != counterfactual_decision),
+                counterfactual_decision=result.decision,
+                changed=(str(trace.decision) != result.decision),
             )
         )
 
     return results
-
 
 @router.get("/report", response_model=InsightReport)
 def report(db: Session = Depends(get_db)):
