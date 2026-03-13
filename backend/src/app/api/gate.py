@@ -44,9 +44,6 @@ _FILLER = {"a", "an", "the", "to", "and", "or", "of", "in", "on", "for"}
 _STOP = _FILLER | {"i", "you", "we", "it", "is", "are", "be", "will", "not"}
 
 def _rl(request: Request):
-    # Rate limiting not yet implemented.
-    # To add: implement rate_limit(request, limit, window_s) raising HTTPException(429) on breach.
-    # Then add Depends(_rl) to any endpoint that needs it.
     pass
 
 
@@ -65,7 +62,6 @@ def _ethos_refs_for(decision: str, max_level: int | None = None) -> list[str]:
     if max_level is not None and max_level >= 3:
         refs += ["Slow is a feature"]
 
-    # de-dupe while preserving order
     seen = set()
     out: list[str] = []
     for r in refs:
@@ -132,10 +128,6 @@ def _has_refund_word(text: str) -> bool:
 
 
 def _max_money_amount(text: str) -> float:
-    """
-    Returns the maximum money amount found in text, or 0.0 if none.
-    Handles £1,000.50 style numbers.
-    """
     max_amt = 0.0
     for m in _MONEY_RE.finditer(text):
         num = m.group(2).replace(",", "")
@@ -160,7 +152,6 @@ def naive_conflicts(request_summary: str, anchors: list[TruthAnchor]) -> list[Tr
     refund_hit = _has_refund_word(request_summary)
     max_amt = _max_money_amount(request_summary)
 
-
     hits: list[TruthAnchor] = []
 
     for a in anchors:
@@ -168,7 +159,6 @@ def naive_conflicts(request_summary: str, anchors: list[TruthAnchor]) -> list[Tr
         stmt_has_not = _has_not(stmt_norm)
         stmt_wo_not = _strip_not(stmt_norm)
 
-        # Strong negation conflict (semantic inversion)
         if req_wo_not == stmt_wo_not and (req_has_not != stmt_has_not):
             hits.append(a)
             continue
@@ -183,7 +173,6 @@ def naive_conflicts(request_summary: str, anchors: list[TruthAnchor]) -> list[Tr
         if bigram_overlap >= 1 or token_overlap >= 2:
             hits.append(a)
 
-    # access .active and .scope directly instead of via getattr for consistency
     if refund_hit and max_amt > 100:
         for a in anchors:
             if a.active and a.scope == "payments.refunds":
@@ -194,13 +183,6 @@ def naive_conflicts(request_summary: str, anchors: list[TruthAnchor]) -> list[Tr
 
 
 def _build_explanations(request_summary: str, conflicts: list[TruthAnchor]) -> list[str]:
-    """
-    Plain-English per-anchor explanations for why each anchor was flagged.
-
-    Intentionally lightweight and transparent:
-    - Negation conflicts get a semantic-inversion note.
-    - Keyword overlaps list the matching tokens.
-    """
     req_norm = _norm(request_summary)
     req_has_not = _has_not(req_norm)
     req_wo_not = _strip_not(req_norm)
@@ -217,7 +199,6 @@ def _build_explanations(request_summary: str, conflicts: list[TruthAnchor]) -> l
     filler = {"a", "an", "the", "to", "and", "or", "of", "in", "on", "for"}
     stop = filler | {"i", "you", "we", "it", "is", "are", "be", "will", "not"}
 
-
     for a in conflicts:
         stmt_norm = _norm(a.statement)
         stmt_has_not = _has_not(stmt_norm)
@@ -225,7 +206,6 @@ def _build_explanations(request_summary: str, conflicts: list[TruthAnchor]) -> l
 
         header = f"Anchor L{a.level} ({a.scope}): \"{a.statement}\""
 
-        # Strong negation conflict
         if req_wo_not == stmt_wo_not and (req_has_not != stmt_has_not):
             explanations.append(
                 f"{header} — triggered because the request and anchor match after removing 'not', "
@@ -233,7 +213,6 @@ def _build_explanations(request_summary: str, conflicts: list[TruthAnchor]) -> l
             )
             continue
 
-        # High-risk intent explanation (preferred when detected)
         if high_risk_hits:
             explanations.append(
                 f"{header} — triggered because the request contains high-risk intent phrasing: "
@@ -241,7 +220,6 @@ def _build_explanations(request_summary: str, conflicts: list[TruthAnchor]) -> l
             )
             continue
 
-        # Keyword overlap explanation
         req_tokens = _meaningful_tokens(req_norm)
         req_token_set = set(req_tokens)
         req_bigrams = _bigrams(req_tokens)
@@ -310,12 +288,10 @@ def _detect_conflicts(request_text: str, anchors: list[TruthAnchor]) -> tuple[li
 
 
 def _norm_state(val):
-    """Normalize state value (passthrough for now; extend as needed)."""
     return val
 
 @router.post("/evaluate", response_model=GateEvaluateOut, response_model_exclude_none=True)
 def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db), tenant: Tenant = Depends(get_tenant)):
-    # 1) Load the anchor set we actually evaluated against
     if payload.profile_id is not None:
         profile = db.get(PolicyProfile, payload.profile_id)
         if not profile:
@@ -338,7 +314,6 @@ def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db), tenant: Ten
         )
         active_anchors = list(db.scalars(stmt_all).all())
 
-    # 2) Run conflict detection (with audit-safe matcher logging)
     conflicts, match_debug = _detect_conflicts(payload.request_summary, active_anchors)
 
     explanations_list = _build_explanations(payload.request_summary, conflicts)
@@ -350,7 +325,6 @@ def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db), tenant: Ten
     max_level = max((a.level for a in conflicts), default=0)
     num_l3 = sum(1 for a in conflicts if a.level >= 3)
 
-    # 3) Run your deterministic decision
     decision = decide(
         state=UserState(arousal=payload.arousal, dominance=payload.dominance),
         conflicted_anchor_ids=conflicted_ids,
@@ -358,7 +332,6 @@ def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db), tenant: Ten
         num_l3_conflicts=num_l3,
     )
 
-    # 4) Prepare log row
     log = GateLog(
         request_summary=payload.request_summary,
         arousal=payload.arousal,
@@ -369,9 +342,8 @@ def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db), tenant: Ten
         interpretation=explanation_text,
     )
     db.add(log)
-    db.flush()  # assigns log.id without committing yet
+    db.flush()
 
-    # 5) Create DecisionTrace
     match_debug["conflicted_ids"] = conflicted_ids
     match_debug["max_level_conflict"] = max_level
 
@@ -388,9 +360,8 @@ def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db), tenant: Ten
     )
 
     db.add(trace)
-    db.flush()  # assigns trace.id
+    db.flush()
 
-    # 6) Snapshot ALL anchors considered + mark which ones conflicted
     conflicted_set = set(conflicted_ids)
     for a in active_anchors:
         db.add(
@@ -407,13 +378,11 @@ def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db), tenant: Ten
             )
         )
 
-    # 7) Commit once (log + trace + trace anchors)
     db.commit()
     db.refresh(log)
 
     warning_anchor_out = [AnchorOut.model_validate(a, from_attributes=True) for a in conflicts]
 
-    # Only include the explanation when gated/refused
     interpretation: Optional[str] = None
     suggestion: Optional[str] = None
     explanations: Optional[List[str]] = None
@@ -442,25 +411,22 @@ def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db), tenant: Ten
 
 
 @router.post("/reframe", response_model=GateReframeOut)
-def reframe(payload: GateReframeIn, db: Session = Depends(get_db)):
+def reframe(payload: GateReframeIn, db: Session = Depends(get_db), tenant: Tenant = Depends(get_tenant)):
     parent = db.get(GateLog, payload.log_id)
     if parent is None:
         raise HTTPException(status_code=404, detail="gate log not found")
 
     reframed = payload.new_intent.strip()
 
-    # Use explicit None check so empty string "" doesn't fall back to parent value
     arousal_raw = payload.arousal if payload.arousal is not None else parent.arousal
     dominance_raw = payload.dominance if payload.dominance is not None else parent.dominance
 
-    # Normalize state values
     arousal = _norm_state(arousal_raw)
     dominance = _norm_state(dominance_raw)
 
     stmt_all = select(TruthAnchor).where(TruthAnchor.active == True)  # noqa: E712
     active_anchors = list(db.scalars(stmt_all).all())
 
-    # Run conflict detection with the reframed request
     conflicts, _match_debug = _detect_conflicts(reframed, active_anchors)
     conflicted_ids = [a.id for a in conflicts]
     warnings = [a.statement for a in conflicts]
@@ -512,16 +478,14 @@ def reframe(payload: GateReframeIn, db: Session = Depends(get_db)):
 
 
 @router.get("/replay/{trace_id}", response_model=ReplayOut)
-def replay(trace_id: int, db: Session = Depends(get_db)):
+def replay(trace_id: int, db: Session = Depends(get_db), tenant: Tenant = Depends(get_tenant)):
     trace = db.get(DecisionTrace, trace_id)
     if not trace:
         raise HTTPException(status_code=404, detail="Trace not found")
 
-    # Load original trace anchor snapshot rows (the ordered policy set used)
     original_rows = list(trace.anchors)
     anchor_ids = [r.anchor_id for r in original_rows]
 
-    # Load current anchors for those ids
     current_anchors = (
         db.execute(select(TruthAnchor).where(TruthAnchor.id.in_(anchor_ids)))
         .scalars()
@@ -531,7 +495,6 @@ def replay(trace_id: int, db: Session = Depends(get_db)):
 
     drift: list[str] = []
 
-    # Drift check: missing, changed hash, or active flip
     for r in original_rows:
         a = current_by_id.get(r.anchor_id)
         if not a:
@@ -559,13 +522,10 @@ def replay(trace_id: int, db: Session = Depends(get_db)):
                 f"Anchor {r.anchor_id} scope changed ({r.scope_snapshot} -> {a.scope})"
             )
 
-    # Re-run decision using CURRENT anchors (same request)
     request_text = trace.request_text
 
-    # Preserve original anchor ordering from the trace
     anchors_ordered_now = [current_by_id[i] for i in anchor_ids if i in current_by_id]
 
-    # Use _detect_conflicts() so SW_MATCHER env var is respected during replay
     conflicts, _replay_match_debug = _detect_conflicts(request_text, anchors_ordered_now)
     conflicted_ids = [a.id for a in conflicts]
     max_level = max((a.level for a in conflicts), default=0)
@@ -573,7 +533,6 @@ def replay(trace_id: int, db: Session = Depends(get_db)):
     state = UserState(
         arousal=_norm_state(trace.arousal),
         dominance=_norm_state(trace.dominance),
-        
     )
 
     result = decide(
@@ -592,11 +551,9 @@ def replay(trace_id: int, db: Session = Depends(get_db)):
     decision_now = _get(result, "decision", "")
     reason_now = _get(result, "reason", "")
 
-    # Re-build explanation from current conflicts so same_explanation is meaningful
     explanations_now = _build_explanations(request_text, conflicts)
     explanation_now = " | ".join(explanations_now)
 
-    # Detect newly added active anchors not present in original trace
     all_active_ids = set(
         db.execute(
             select(TruthAnchor.id).where(TruthAnchor.active == True)  # noqa: E712
@@ -643,10 +600,8 @@ def list_gate_logs(
         description="Optional filter: ISO timestamp (e.g. 2026-02-06T18:00:00)",
     ),
     db: Session = Depends(get_db),
+    tenant: Tenant = Depends(get_tenant),
 ):
-    """
-    List gate logs, newest-first, with optional filters.
-    """
     base_where = []
 
     if decision is not None:
@@ -679,8 +634,10 @@ def list_gate_logs(
         limit=limit,
         offset=offset,
     )
+
+
 @router.post("/acknowledge", response_model=GateAcknowledgeOut)
-def acknowledge(payload: GateAcknowledgeIn, db: Session = Depends(get_db)):
+def acknowledge(payload: GateAcknowledgeIn, db: Session = Depends(get_db), tenant: Tenant = Depends(get_tenant)):
     """
     proceed_acknowledged flow.
     Called when a user chooses to proceed despite a level-2 gate.
@@ -691,7 +648,6 @@ def acknowledge(payload: GateAcknowledgeIn, db: Session = Depends(get_db)):
     if parent is None:
         raise HTTPException(status_code=404, detail="gate log not found")
 
-    # Only valid after a level-2 gate
     if parent.decision != "gate" or "l2" not in parent.reason:
         raise HTTPException(
             status_code=422,
@@ -734,7 +690,7 @@ def acknowledge(payload: GateAcknowledgeIn, db: Session = Depends(get_db)):
 
 
 @router.get("/logs/{log_id}", response_model=GateLogOut)
-def get_gate_log(log_id: int, db: Session = Depends(get_db)):
+def get_gate_log(log_id: int, db: Session = Depends(get_db), tenant: Tenant = Depends(get_tenant)):
     row = db.get(GateLog, log_id)
     if row is None:
         raise HTTPException(status_code=404, detail="gate log not found")

@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from app.api.gate import _detect_conflicts
 from app.gate import decide, UserState
 from app.dependencies import get_db
+from app.auth import get_tenant
+from app.models import Tenant
 from app.models import DecisionTrace, GateLog, TruthAnchor
 from typing import List
 
@@ -61,7 +63,7 @@ class DecisionSummary(BaseModel):
 
 
 @router.get("/summary", response_model=DecisionSummary)
-def summary(db: Session = Depends(get_db)):
+def summary(db: Session = Depends(get_db), tenant: Tenant = Depends(get_tenant)):
     rows = db.execute(
         select(DecisionTrace.decision, func.count(DecisionTrace.id).label("n"))
         .group_by(DecisionTrace.decision)
@@ -108,7 +110,7 @@ class AnchorOverrideRate(BaseModel):
 
 
 @router.get("/override-rate", response_model=list[AnchorOverrideRate])
-def override_rate(db: Session = Depends(get_db)):
+def override_rate(db: Session = Depends(get_db), tenant: Tenant = Depends(get_tenant)):
 
     gate_rows = db.execute(
         select(GateLog.conflicted_anchor_ids, GateLog.reason, GateLog.decision)
@@ -191,7 +193,7 @@ class DeadAnchor(BaseModel):
 
 
 @router.get("/dead-anchors", response_model=list[DeadAnchor])
-def dead_anchors(db: Session = Depends(get_db)):
+def dead_anchors(db: Session = Depends(get_db), tenant: Tenant = Depends(get_tenant)):
 
     matched_ids = set()
 
@@ -249,7 +251,7 @@ class ParticipationAnchor(BaseModel):
 
 @router.get("/participation", response_model=list[ParticipationAnchor])
 @router.get("/drift", response_model=list[ParticipationAnchor])
-def participation(db: Session = Depends(get_db)):
+def participation(db: Session = Depends(get_db), tenant: Tenant = Depends(get_tenant)):
 
     matched_ids = []
 
@@ -343,7 +345,7 @@ class _PatchedAnchor:
 
 
 @router.post("/counterfactual", response_model=list[CounterfactualOut])
-def counterfactual(payload: CounterfactualIn, db: Session = Depends(get_db)):
+def counterfactual(payload: CounterfactualIn, db: Session = Depends(get_db), tenant: Tenant = Depends(get_tenant)):
     results = []
 
     traces = db.execute(
@@ -391,11 +393,11 @@ def counterfactual(payload: CounterfactualIn, db: Session = Depends(get_db)):
     return results
 
 @router.get("/report", response_model=InsightReport)
-def report(db: Session = Depends(get_db)):
-    summary_data = summary(db)
-    override_data = override_rate(db)
-    dead_anchor_data = dead_anchors(db)
-    participation_data = participation(db)
+def report(db: Session = Depends(get_db), tenant: Tenant = Depends(get_tenant)):
+    summary_data = summary(db, tenant)
+    override_data = override_rate(db, tenant)
+    dead_anchor_data = dead_anchors(db, tenant)
+    participation_data = participation(db, tenant)
 
     return InsightReport(
         summary=summary_data,
