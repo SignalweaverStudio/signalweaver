@@ -191,6 +191,47 @@ These allow teams to understand:
 This turns decision logs into operational intelligence rather than just an audit trail.
 
 ---
+
+## Counterfactual Policy Testing
+
+SignalWeaver can simulate how policy changes would have affected historical decisions.
+
+This allows teams to safely test new rules before deploying them.
+
+Example:
+
+```json
+POST /insight/counterfactual
+
+{
+  "trace_ids": [190,191,192],
+  "proposed_changes": [
+    {
+      "anchor_id": 8,
+      "new_statement": "Actions causing financial harm must always be gated."
+    }
+  ]
+}
+```
+
+Response:
+
+```
+trace_id  original  counterfactual  changed
+190       gate      refuse          true
+191       gate      refuse          true
+192       proceed   proceed         false
+```
+
+This allows teams to answer questions like:
+
+- *What would have happened if we tightened this rule?*
+- *Would a new policy reduce risky approvals?*
+- *Would it cause excessive blocking?*
+
+Instead of guessing, teams can **test policies against real decision history.**
+
+---
 ## Getting started
 
 Requirements: Python 3.10+, Windows (PowerShell) or Linux/Mac
