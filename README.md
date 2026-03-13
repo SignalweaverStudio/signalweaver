@@ -47,6 +47,33 @@ SignalWeaver sits between AI systems and the actions they trigger,
 enforcing deterministic policy checks before execution.
 
 ---
+
+## Decision Flow
+
+```mermaid
+flowchart TD
+    Request["Incoming Request"]
+    LoadAnchors["Load Active Anchors"]
+    Match["Evaluate Request Against Anchors"]
+    Conflict{"Conflict Detected?"}
+    Proceed["Decision: Proceed"]
+    Gate["Decision: Gate"]
+    Refuse["Decision: Refuse"]
+    Log["Write Decision Trace"]
+
+    Request --> LoadAnchors
+    LoadAnchors --> Match
+    Match --> Conflict
+    Conflict -->|No| Proceed
+    Conflict -->|L2| Gate
+    Conflict -->|L3| Refuse
+    Proceed --> Log
+    Gate --> Log
+    Refuse --> Log
+```
+
+---
+
 ## Quick example
 
 You have an AI customer support agent that can approve refunds. Your policy: refunds above £10,000 need a human to sign off.
