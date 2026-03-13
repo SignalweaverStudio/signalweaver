@@ -2,11 +2,15 @@
 
 **Your AI agents are making decisions. Can you prove they made the right ones?**
 
-AI systems are approving refunds, granting access, triggering workflows. Most teams have no consistent way to enforce policy on those decisions — or explain them after the fact.
+AI systems are approving refunds, granting access, triggering workflows,
+and executing automated actions.
+
+Most teams have no consistent way to enforce policy on those decisions —
+or explain them after the fact.
 
 When something goes wrong, *"the AI decided"* is not an acceptable answer.
 
-SignalWeaver is a deterministic governance middleware. It sits between your AI agent and the actions it takes, evaluates every request against your policy rules, and returns a decision: **proceed**, **gate**, or **refuse**. Every decision is logged with a replayable trace. Same input, same policy version, same output — every time.
+SignalWeaver is a deterministic policy enforcement layer. It sits between your AI agent and the actions it takes, evaluates every request against your policy rules, and returns a decision: **proceed**, **gate**, or **refuse**. Every decision is logged with a replayable trace. Same input, same policy version, same output — every time.
 
 ---
 
@@ -16,7 +20,7 @@ SignalWeaver is a deterministic governance middleware. It sits between your AI a
 - **Deterministic decisions** — same input always produces the same output
 - **Replayable traces** — any past decision can be reconstructed exactly and audited later
 - **No model dependency** — rules are plain text, not prompts. Model behaviour doesn't affect enforcement.
-
+- **SignalWeaver does for AI decisions what firewalls do for network traffic.
 ---
 
 ## Quick example
@@ -92,6 +96,20 @@ Anchors are stored in the database and evaluated on every request. They're not p
 
 ---
 
+## Insight (decision analytics)
+
+SignalWeaver can analyse historical decisions using the Insight endpoints.
+
+These allow teams to understand:
+
+• which rules trigger most often
+• where human overrides occur
+• whether policies drift over time
+• which anchors are unused
+
+This turns decision logs into operational intelligence rather than just an audit trail.
+
+---
 ## Getting started
 
 Requirements: Python 3.10+, Windows (PowerShell) or Linux/Mac
