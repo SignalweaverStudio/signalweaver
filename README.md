@@ -1,16 +1,25 @@
 # SignalWeaver
 
+![Python](https://img.shields.io/badge/python-3.10+-blue)
+![FastAPI](https://img.shields.io/badge/framework-FastAPI-009688)
+![License](https://img.shields.io/badge/license-MIT-green)
+
 **Your AI agents are making decisions. Can you prove they made the right ones?**
 
-AI systems are approving refunds, granting access, triggering workflows,
-and executing automated actions.
+AI governance for teams who can't afford to be wrong.
 
-Most teams have no consistent way to enforce policy on those decisions —
-or explain them after the fact.
+SignalWeaver is a deterministic policy enforcement layer for AI systems.
+It evaluates requests against structured **Truth Anchors**, produces a
+clear **decision outcome**, and records a **replayable trace** for audit
+and analysis.
 
-When something goes wrong, *"the AI decided"* is not an acceptable answer.
+**Core capabilities**
 
-SignalWeaver is a deterministic policy enforcement layer. It sits between your AI agent and the actions it takes, evaluates every request against your policy rules, and returns a decision: **proceed**, **gate**, or **refuse**. Every decision is logged with a replayable trace. Same input, same policy version, same output — every time.
+- Deterministic decision engine (no hidden model behaviour)
+- Policy enforcement using structured Truth Anchors
+- Replayable decision traces for auditability
+- Insight analytics to analyse policy effectiveness
+- FastAPI service designed to sit between AI agents and real-world actions
 
 ---
 
