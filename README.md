@@ -41,6 +41,10 @@ flowchart LR
     Anchors --> SignalWeaver
     SignalWeaver --> DecisionLog
     DecisionLog --> Insight
+```
+
+SignalWeaver sits between AI systems and the actions they trigger,
+enforcing deterministic policy checks before execution.
 
 ---
 ## Quick example
