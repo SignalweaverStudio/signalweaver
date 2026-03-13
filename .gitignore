@@ -158,3 +158,6 @@ backend/signalweaver.db
 backend/*.db
 backend/.venv/
 payload.json
+.claude/
+CLAUDE.md
+repo_structure.txt
