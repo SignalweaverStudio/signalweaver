@@ -33,6 +33,27 @@ and analysis.
 
 ---
 
+## Why this exists
+
+AI systems are increasingly allowed to trigger real-world actions:
+
+• approving refunds  
+• granting system access  
+• executing automated workflows  
+• moderating content  
+• triggering financial or operational events  
+
+Most teams have **no deterministic policy layer** governing those decisions.
+
+SignalWeaver provides that layer.
+
+It ensures that every automated decision can be:
+
+- evaluated against explicit policy anchors  
+- explained in plain language  
+- replayed deterministically  
+- analysed for policy effectiveness
+
 ## Architecture
 
 ```mermaid
@@ -273,7 +294,16 @@ pip install sentence-transformers scikit-learn
 
 ## Project status
 
-Working backend prototype. Core engine is operational: policy evaluation, decision traces, replay, and drift detection all functional. No UI — interaction is via API.
+SignalWeaver is under active development.
+
+The current repository contains the core **decision engine**, **policy anchor system**, and **Insight analytics layer**.
+
+Future work includes:
+
+- multi-tenant policy management
+- deployment templates
+- enterprise audit tooling
+- hosted control plane
 
 **Not yet implemented:** authentication, multi-tenancy, production hardening.
 
