@@ -21,8 +21,28 @@ SignalWeaver is a deterministic policy enforcement layer. It sits between your A
 - **Replayable traces** — any past decision can be reconstructed exactly and audited later
 - **No model dependency** — rules are plain text, not prompts. Model behaviour doesn't affect enforcement.
 - **SignalWeaver does for AI decisions what firewalls do for network traffic.
+
 ---
 
+## Architecture
+
+```mermaid
+flowchart LR
+    UserRequest["User / AI Request"]
+    AIModel["AI Model or Agent"]
+    SignalWeaver["SignalWeaver Gate"]
+    Anchors["Truth Anchors (Policies)"]
+    DecisionLog["Decision Trace Log"]
+    Insight["Insight Analytics"]
+
+    UserRequest --> AIModel
+    AIModel --> SignalWeaver
+    SignalWeaver --> Anchors
+    Anchors --> SignalWeaver
+    SignalWeaver --> DecisionLog
+    DecisionLog --> Insight
+
+---
 ## Quick example
 
 You have an AI customer support agent that can approve refunds. Your policy: refunds above £10,000 need a human to sign off.
