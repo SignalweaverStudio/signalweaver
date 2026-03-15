@@ -9,6 +9,7 @@ from app.api.reports import router as reports_router
 from app.db import engine
 from app.models import Base
 from app.api.anchors import router as anchors_router
+from app.api.tenants import router as tenants_router
 from app.api.gate import router as gate_router
 
 app = FastAPI(title="SignalWeaver MVP")
@@ -38,6 +39,7 @@ def tester():
     return html_path.read_text(encoding="utf-8")
 
 
+app.include_router(tenants_router, prefix="/tenants", tags=["tenants"])
 app.include_router(anchors_router, prefix="/anchors", tags=["anchors"])
 app.include_router(gate_router, prefix="/gate", tags=["gate"])
 app.include_router(profiles_router, prefix="/profiles", tags=["profiles"])

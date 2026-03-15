@@ -14,6 +14,8 @@ from app.security import verify_api_key, rate_limit
 
 
 from app.db import get_db
+from app.auth import get_tenant
+from app.models import Tenant
 def _rl(request: Request):
     # FIX 5: rate_limit() must raise HTTPException on breach; if it only returns a value
     # this dependency silently does nothing. Verified here by calling and ignoring return —
@@ -334,7 +336,7 @@ def _detect_conflicts(request_text: str, anchors: list[TruthAnchor]) -> tuple[li
 
 
 @router.post("/evaluate", response_model=GateEvaluateOut, response_model_exclude_none=True)
-def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db)):
+def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db), tenant: Tenant = Depends(get_tenant)):
     # 1) Load active anchors
     stmt_all = select(TruthAnchor).where(TruthAnchor.active == True)  # noqa: E712
     active_anchors = list(db.scalars(stmt_all).all())
@@ -440,7 +442,7 @@ def evaluate(payload: GateEvaluateIn, db: Session = Depends(get_db)):
 
 
 @router.post("/reframe", response_model=GateReframeOut)
-def reframe(payload: GateReframeIn, db: Session = Depends(get_db)):
+def reframe(payload: GateReframeIn, db: Session = Depends(get_db), tenant: Tenant = Depends(get_tenant)):
     parent = db.get(GateLog, payload.log_id)
     if parent is None:
         raise HTTPException(status_code=404, detail="gate log not found")
@@ -525,7 +527,7 @@ def reframe(payload: GateReframeIn, db: Session = Depends(get_db)):
 
 
 @router.get("/replay/{trace_id}", response_model=ReplayOut)
-def replay(trace_id: int, db: Session = Depends(get_db)):
+def replay(trace_id: int, db: Session = Depends(get_db), tenant: Tenant = Depends(get_tenant)):
     trace = db.get(DecisionTrace, trace_id)
     if not trace:
         raise HTTPException(status_code=404, detail="Trace not found")

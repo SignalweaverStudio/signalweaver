@@ -5,6 +5,8 @@ from fastapi import Request
 from sqlalchemy import delete
 from app.security import verify_api_key, rate_limit
 from app.db import get_db
+from app.auth import get_tenant
+from app.models import Tenant
 from app.models import PolicyProfile, PolicyProfileAnchor, TruthAnchor
 from app.schemas import (
     PolicyProfileCreate,
@@ -24,7 +26,7 @@ router = APIRouter(
 
 
 @router.post("", response_model=PolicyProfileOut, status_code=201)
-def create_profile(payload: PolicyProfileCreate, db: Session = Depends(get_db)):
+def create_profile(payload: PolicyProfileCreate, db: Session = Depends(get_db), tenant: Tenant = Depends(get_tenant)):
     existing = db.scalar(
         select(PolicyProfile).where(PolicyProfile.name == payload.name)
     )
@@ -40,7 +42,7 @@ def create_profile(payload: PolicyProfileCreate, db: Session = Depends(get_db)):
         ):
             prof.is_default = False
 
-    profile = PolicyProfile(
+    profile = PolicyProfile(tenant_id=tenant.id,
         name=payload.name,
         description=payload.description,
         is_default=payload.is_default or False,
@@ -55,8 +57,8 @@ def create_profile(payload: PolicyProfileCreate, db: Session = Depends(get_db)):
 
 
 @router.get("", response_model=PolicyProfileListOut)
-def list_profiles(db: Session = Depends(get_db)):
-    profiles = list(db.scalars(select(PolicyProfile)).all())
+def list_profiles(db: Session = Depends(get_db), tenant: Tenant = Depends(get_tenant)):
+    profiles = list(db.scalars(select(PolicyProfile).where((PolicyProfile.tenant_id == tenant.id) | (PolicyProfile.tenant_id == None))).all())
     return PolicyProfileListOut(
         items=[
             PolicyProfileOut.model_validate(p, from_attributes=True) for p in profiles
