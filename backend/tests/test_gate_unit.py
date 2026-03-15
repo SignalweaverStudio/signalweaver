@@ -29,7 +29,7 @@ def _state(arousal: str = "unknown", dominance: str = "unknown") -> UserState:
 def test_no_conflicts_proceeds():
     result = decide(_state(), [], 0)
     assert result.decision == "proceed"
-    assert result.reason == "no_high_conflict"
+    assert result.reason == "no_conflict"
     assert result.conflicted_anchor_ids == []
     assert result.next_actions == ["proceed"]
 
@@ -47,8 +47,8 @@ def test_no_conflicts_any_state_proceeds():
 
 def test_low_level_conflict_proceeds():
     result = decide(_state(), [1, 2], 2)
-    assert result.decision == "proceed"
-    assert result.reason == "low_level_conflict"
+    assert result.decision == "gate"
+    assert result.reason == "l2_anchor_conflict"
     assert result.conflicted_anchor_ids == [1, 2]
 
 
@@ -61,7 +61,7 @@ def test_low_level_conflict_has_next_actions():
 def test_low_level_conflict_max_level_2_proceeds():
     # State does not affect L1/L2 outcome; high/low state only matters at L3.
     result = decide(_state("high", "low"), [10], 2)
-    assert result.decision == "proceed"
+    assert result.decision == "gate"
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +204,7 @@ def test_max_level_above_3_triggers_l3_block():
 
 def test_max_level_2_with_conflicts_proceeds():
     result = decide(_state(), [1, 2], 2)
-    assert result.decision == "proceed"
+    assert result.decision == "gate"
 
 
 # ---------------------------------------------------------------------------

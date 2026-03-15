@@ -424,7 +424,9 @@ def reframe(payload: GateReframeIn, db: Session = Depends(get_db), tenant: Tenan
     arousal = _norm_state(arousal_raw)
     dominance = _norm_state(dominance_raw)
 
-    stmt_all = select(TruthAnchor).where(TruthAnchor.active == True)  # noqa: E712
+    stmt_all = select(TruthAnchor).where(TruthAnchor.active == True).where(  # noqa: E712
+        (TruthAnchor.tenant_id == tenant.id) | (TruthAnchor.tenant_id == None)  # noqa: E711
+    )
     active_anchors = list(db.scalars(stmt_all).all())
 
     conflicts, _match_debug = _detect_conflicts(reframed, active_anchors)

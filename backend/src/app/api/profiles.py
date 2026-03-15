@@ -3,7 +3,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select
 
 from app.db import get_db
-from app.models import PolicyProfile, PolicyProfileAnchor, TruthAnchor
+from app.auth import get_tenant
+from app.models import PolicyProfile, Tenant, PolicyProfileAnchor, TruthAnchor
 from app.schemas import (
     PolicyProfileCreate,
     PolicyProfileOut,
@@ -16,7 +17,7 @@ router = APIRouter()
 
 
 @router.post("/", response_model=PolicyProfileOut)
-def create_profile(payload: PolicyProfileCreate, db: Session = Depends(get_db)):
+def create_profile(payload: PolicyProfileCreate, db: Session = Depends(get_db), tenant: Tenant = Depends(get_tenant)):
     profile = PolicyProfile(
         name=payload.name,
         description=payload.description or "",
@@ -30,13 +31,13 @@ def create_profile(payload: PolicyProfileCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/", response_model=PolicyProfileListOut)
-def list_profiles(db: Session = Depends(get_db)):
+def list_profiles(db: Session = Depends(get_db), tenant: Tenant = Depends(get_tenant)):
     rows = list(db.scalars(select(PolicyProfile).order_by(PolicyProfile.id)).all())
     return PolicyProfileListOut(items=rows, total=len(rows))
 
 
 @router.get("/{profile_id}", response_model=PolicyProfileOut)
-def get_profile(profile_id: int, db: Session = Depends(get_db)):
+def get_profile(profile_id: int, db: Session = Depends(get_db), tenant: Tenant = Depends(get_tenant)):
     profile = db.get(PolicyProfile, profile_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
@@ -44,7 +45,7 @@ def get_profile(profile_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{profile_id}/anchors", response_model=ProfileAnchorsOut)
-def assign_anchors(profile_id: int, payload: ProfileAnchorsIn, db: Session = Depends(get_db)):
+def assign_anchors(profile_id: int, payload: ProfileAnchorsIn, db: Session = Depends(get_db), tenant: Tenant = Depends(get_tenant)):
     profile = db.get(PolicyProfile, profile_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
@@ -72,7 +73,7 @@ def assign_anchors(profile_id: int, payload: ProfileAnchorsIn, db: Session = Dep
 
 
 @router.get("/{profile_id}/anchors", response_model=ProfileAnchorsOut)
-def get_profile_anchors(profile_id: int, db: Session = Depends(get_db)):
+def get_profile_anchors(profile_id: int, db: Session = Depends(get_db), tenant: Tenant = Depends(get_tenant)):
     profile = db.get(PolicyProfile, profile_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
