@@ -1,5 +1,0 @@
-# Development / test dependencies (not needed in production)
--r requirements.txt
-
-httpx>=0.27.0
-pytest>=8.0.0
