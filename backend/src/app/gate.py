@@ -1,65 +1,66 @@
+from __future__ import annotations
 from dataclasses import dataclass
-from typing import List
+from typing import List, Literal
 
+# PATCH: added "refuse" to the decision kind literal
+GateDecisionKind = Literal["proceed", "gate", "refuse"]
 
 @dataclass
 class UserState:
-    arousal: str       # low/med/high/unknown
-    dominance: str     # low/med/high/unknown
-
+    arousal: str
+    dominance: str
+    request: str = ""
 
 @dataclass
 class GateDecision:
-    decision: str      # proceed | gate | refuse
+    decision: GateDecisionKind
     reason: str
     conflicted_anchor_ids: List[int]
     interpretation: str
     suggestion: str
-    next_actions: List[str]   # UI-ready actions
-
+    next_actions: List[str]
+    would_block: bool = False
 
 def decide(
     state: UserState,
     conflicted_anchor_ids: List[int],
     max_level_conflict: int,
-    num_l3_conflicts: int = 0,
+    l3_count: int = 0,  # PATCH: count of L3 anchors in the conflict set
 ) -> GateDecision:
     """
-    Gate decision logic (v1.3).
+    Core deterministic gate logic. Unchanged from v1.x.
+    This function is enforcement-mode-agnostic.
 
-    Decision priority (highest → lowest):
-      1. multi_l3_conflict                 num_l3_conflicts > 1          → refuse
-      2. state_mismatch_with_l3_anchor     L3 + high-arousal/low-control → gate
-      3. l3_anchor_conflict                any single L3 conflict        → gate
-      4. state_mismatch_with_l2_anchor     L2 + high-arousal/low-control → gate (soft)
-      5. l2_anchor_conflict                any L2 conflict               → gate (soft)
-      6. l1_advisory_conflict              L1 conflicts only             → proceed (advisory)
-      7. no_conflict                       no conflicts at all           → proceed
+    l3_count: number of conflicting anchors at level >= 3.
+    When l3_count >= 2, the request is refused outright — no reframing path exists.
     """
-
-    # --- Level 3: hard gate ---
     if max_level_conflict >= 3:
-
-        # Refuse: multiple L3 anchors fire simultaneously — too severe to reframe.
-        if num_l3_conflicts > 1:
+        # PATCH: refuse when two or more L3 anchors conflict simultaneously
+        if l3_count >= 2:
             return GateDecision(
                 decision="refuse",
-                reason="multi_l3_conflict",
+                reason="multi_l3_anchor_conflict",
                 conflicted_anchor_ids=conflicted_anchor_ids,
-                interpretation="Multiple level-3 boundaries conflict with this request simultaneously.",
-                suggestion="This request cannot be reframed. Review the active L3 anchors or seek guidance.",
-                next_actions=["view_conflicts", "cancel"],
+                interpretation=(
+                    "This request conflicts with multiple level-3 boundaries simultaneously. "
+                    "No reframing path is available."
+                ),
+                suggestion="Cancel this action and reconsider the intent entirely.",
+                next_actions=["cancel", "view_conflicts"],
+                would_block=True,
             )
-
-        # Gate: single L3 conflict while in a dysregulated state.
         if state.arousal == "high" and state.dominance == "low":
             return GateDecision(
                 decision="gate",
                 reason="state_mismatch_with_l3_anchor",
                 conflicted_anchor_ids=conflicted_anchor_ids,
-                interpretation="This conflicts with a level-3 boundary while your state reads high-arousal / low-control.",
+                interpretation=(
+                    "This conflicts with a level-3 boundary while your state reads "
+                    "high-arousal / low-control."
+                ),
                 suggestion="Pause, then reframe the intent to align with the boundary.",
                 next_actions=["pause", "reframe", "view_conflicts"],
+                would_block=True,
             )
         return GateDecision(
             decision="gate",
@@ -68,45 +69,90 @@ def decide(
             interpretation="This conflicts with a level-3 boundary (protected constraint).",
             suggestion="Rephrase the request so it stays within the boundary.",
             next_actions=["reframe", "view_conflicts", "cancel"],
+            would_block=True,
         )
-
-    # --- Level 2: soft gate ---
-    if max_level_conflict == 2:
-        if state.arousal == "high" and state.dominance == "low":
-            return GateDecision(
-                decision="gate",
-                reason="state_mismatch_with_l2_anchor",
-                conflicted_anchor_ids=conflicted_anchor_ids,
-                interpretation="This conflicts with a level-2 policy while your state reads high-arousal / low-control.",
-                suggestion="Consider pausing. You can reframe or proceed with acknowledgement.",
-                next_actions=["pause", "reframe", "proceed_acknowledged", "view_conflicts"],
-            )
-        return GateDecision(
-            decision="gate",
-            reason="l2_anchor_conflict",
-            conflicted_anchor_ids=conflicted_anchor_ids,
-            interpretation="This conflicts with a level-2 policy constraint.",
-            suggestion="Reframe the request to stay within the boundary, or proceed with acknowledgement.",
-            next_actions=["reframe", "proceed_acknowledged", "view_conflicts"],
-        )
-
-    # --- Level 1: advisory (proceed with warning) ---
-    if max_level_conflict == 1:
+    if conflicted_anchor_ids:
         return GateDecision(
             decision="proceed",
-            reason="l1_advisory_conflict",
+            reason="low_level_conflict",
             conflicted_anchor_ids=conflicted_anchor_ids,
-            interpretation="A low-priority advisory constraint was noted. No block applied.",
-            suggestion="Proceed, but review the flagged anchor for alignment.",
-            next_actions=["proceed", "view_conflicts"],
+            interpretation="Minor conflicts detected, but nothing high-priority was violated.",
+            suggestion="Proceed, but tighten wording to avoid drift.",
+            next_actions=["proceed", "tighten_wording", "view_conflicts"],
+            would_block=False,
         )
-
-    # --- No conflict ---
     return GateDecision(
         decision="proceed",
-        reason="no_conflict",
+        reason="no_high_conflict",
         conflicted_anchor_ids=[],
         interpretation="No conflicts detected against active anchors.",
         suggestion="Proceed normally.",
         next_actions=["proceed"],
+        would_block=False,
     )
+
+def apply_enforcement_mode(
+    decision: GateDecision,
+    enforcement_mode: str,
+    max_level_conflict: int,
+) -> GateDecision:
+    """
+    Applies the governance spectrum on top of the raw gate decision.
+    Does NOT mutate the original decision – returns a new one.
+    shadow: always return proceed, log would_block
+    soft:   gate on L2 and L3, allow override
+    hard:   gate on L3 automatically, L2 behaves as soft gate
+    """
+    mode = enforcement_mode.lower()
+    # --- Shadow mode: observe only, never block ---
+    if mode == "shadow":
+        return GateDecision(
+            decision="proceed",
+            reason="shadow_mode_observe_only",
+            conflicted_anchor_ids=decision.conflicted_anchor_ids,
+            interpretation=decision.interpretation,
+            suggestion=decision.suggestion,
+            next_actions=["proceed"],
+            would_block=decision.would_block,
+        )
+    # --- Soft mode: L2 and L3 both gate, override allowed ---
+    if mode == "soft":
+        if max_level_conflict >= 2:
+            return GateDecision(
+                decision="gate",
+                reason=decision.reason,
+                conflicted_anchor_ids=decision.conflicted_anchor_ids,
+                interpretation=decision.interpretation,
+                suggestion=decision.suggestion,
+                next_actions=["override", "reframe", "view_conflicts"],
+                would_block=decision.would_block,
+            )
+        return decision
+    # --- Hard mode: L3 auto-blocks, L2 is soft gate ---
+    if mode == "hard":
+        if max_level_conflict >= 3:
+            # PATCH: refuse decisions pass through hard mode unchanged — do not downgrade to gate
+            if decision.decision == "refuse":
+                return decision
+            return GateDecision(
+                decision="gate",
+                reason=decision.reason,
+                conflicted_anchor_ids=decision.conflicted_anchor_ids,
+                interpretation=decision.interpretation,
+                suggestion=decision.suggestion,
+                next_actions=["reframe", "view_conflicts", "cancel"],
+                would_block=True,
+            )
+        if max_level_conflict == 2:
+            return GateDecision(
+                decision="gate",
+                reason=decision.reason,
+                conflicted_anchor_ids=decision.conflicted_anchor_ids,
+                interpretation=decision.interpretation,
+                suggestion=decision.suggestion,
+                next_actions=["override", "reframe", "view_conflicts"],
+                would_block=decision.would_block,
+            )
+        return decision
+    # Fallback: treat unknown mode as hard
+    return decision

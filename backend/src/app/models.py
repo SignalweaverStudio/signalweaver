@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+﻿from datetime import datetime, timezone
 import hashlib
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy import (
@@ -35,7 +35,7 @@ class Tenant(Base):
 
 
 # ============================================================
-# Truth Anchors (existing — unchanged)
+# Truth Anchors
 # ============================================================
 
 class TruthAnchor(Base):
@@ -58,7 +58,6 @@ class TruthAnchor(Base):
         default=lambda: datetime.now(timezone.utc),
     )
 
-    # backrefs for policy profiles + traces
     profiles: Mapped[list["PolicyProfileAnchor"]] = relationship(
         back_populates="anchor",
         cascade="all, delete-orphan",
@@ -70,16 +69,12 @@ class TruthAnchor(Base):
     )
 
     def stable_hash(self) -> str:
-        """
-        Deterministic hash of the anchor's effective policy meaning.
-        If any of these fields change, the hash changes.
-        """
         payload = f"{self.level}|{self.scope}|{int(bool(self.active))}|{self.statement}".encode("utf-8")
         return hashlib.sha256(payload).hexdigest()
 
 
 # ============================================================
-# Gate Logs (existing — unchanged)
+# Gate Logs
 # ============================================================
 
 class GateLog(Base):
@@ -108,7 +103,7 @@ class GateLog(Base):
 
 
 # ============================================================
-# Policy Profiles (existing from our last step)
+# Policy Profiles
 # ============================================================
 
 class PolicyProfile(Base):
@@ -119,6 +114,17 @@ class PolicyProfile(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    tenant_id: Mapped[int | None] = mapped_column(
+        ForeignKey("tenants.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    # Governance Spectrum: "shadow" | "soft" | "hard"
+    enforcement_mode: Mapped[str] = mapped_column(
+        String(16), default="hard", server_default="hard"
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
@@ -173,7 +179,7 @@ class PolicyProfileAnchor(Base):
 
 
 # ============================================================
-# Decision Trace + Replay (NEW — the "damn" feature)
+# Decision Trace + Replay
 # ============================================================
 
 class DecisionTrace(Base):
@@ -185,27 +191,28 @@ class DecisionTrace(Base):
         default=lambda: datetime.now(timezone.utc),
     )
 
-    # optional: tie trace to a policy profile when we implement profile selection
     policy_profile_id: Mapped[int | None] = mapped_column(
         ForeignKey("policy_profiles.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
 
-    # request + normalization snapshots (audit gold)
     request_text: Mapped[str] = mapped_column(Text)
     request_normalized: Mapped[str] = mapped_column(Text, default="")
 
     arousal: Mapped[str] = mapped_column(String(16), default="unknown")
     dominance: Mapped[str] = mapped_column(String(16), default="unknown")
 
-    # output snapshots (what we decided, exactly)
     decision: Mapped[str] = mapped_column(String(16))  # proceed/gate/refuse
     reason: Mapped[str] = mapped_column(String(64), default="")
     explanation: Mapped[str] = mapped_column(Text, default="")
 
-    # freeform JSON-as-text for per-anchor match details (keep SQLite-simple)
     match_debug_json: Mapped[str] = mapped_column(Text, default="")
+
+    # Governance Spectrum audit fields
+    would_block: Mapped[bool] = mapped_column(Boolean, default=False)
+    enforcement_mode_snapshot: Mapped[str] = mapped_column(String(16), default="hard")
+    override_reason: Mapped[str] = mapped_column(Text, default="")
 
     policy_profile: Mapped["PolicyProfile"] = relationship(
         back_populates="traces"
@@ -233,14 +240,12 @@ class DecisionTraceAnchor(Base):
         index=True,
     )
 
-    # snapshot/hash for drift detection
     anchor_hash: Mapped[str] = mapped_column(String(64), index=True)
     level_snapshot: Mapped[int] = mapped_column(Integer)
     scope_snapshot: Mapped[str] = mapped_column(String(64))
     active_snapshot: Mapped[bool] = mapped_column(Boolean)
     statement_snapshot: Mapped[str] = mapped_column(Text)
 
-    # optional match info (populate if available)
     matched: Mapped[bool] = mapped_column(Boolean, default=False)
     match_note: Mapped[str] = mapped_column(Text, default="")
 

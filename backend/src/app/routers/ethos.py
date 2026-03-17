@@ -1,8 +1,11 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import PlainTextResponse
 from pathlib import Path
+from app.auth import get_tenant
 
-router = APIRouter(tags=["ethos"])
+router = APIRouter(
+    dependencies=[Depends(get_tenant)],
+)
 
 @router.get("/ethos", response_class=PlainTextResponse, summary="Return SignalWeaver ethos invariants")
 def get_ethos():

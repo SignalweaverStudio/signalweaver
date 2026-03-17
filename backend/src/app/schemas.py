@@ -1,56 +1,53 @@
 from datetime import datetime
-from typing import Any, List, Literal, Optional
-from pydantic import BaseModel, Field, ConfigDict, field_validator
+from enum import Enum
+from typing import List, Optional, Any
+from typing import Literal
 
-# -----------------------------
-# Helpers
-# -----------------------------
-Decision = Literal["proceed", "gate", "refuse"]
-Arousal = Literal["low", "med", "high", "unknown"]
-Dominance = Literal["low", "med", "high", "unknown"]
+DecisionLiteral = Literal["proceed", "gate", "refuse"]
+from pydantic import BaseModel, Field, ConfigDict
 
 
-def parse_id_list(value: str) -> List[int]:
-    """
-    Converts stored anchor id strings into lists.
-    Examples:
-        ""        -> []
-        "1,2,3"   -> [1,2,3]
-        "[1,2]"   -> [1,2]
-    """
-    if not value:
+class Arousal(str, Enum):
+    low = "low"
+    med = "med"
+    high = "high"
+    unknown = "unknown"
+
+
+class Dominance(str, Enum):
+    low = "low"
+    med = "med"
+    high = "high"
+    unknown = "unknown"
+
+
+class EnforcementMode(str, Enum):
+    shadow = "shadow"
+    soft = "soft"
+    hard = "hard"
+
+
+def parse_id_list(s: Optional[str]) -> List[int]:
+    if not s:
         return []
-    v = value.strip()
-    if v == "" or v == "[]":
-        return []
-    if v.startswith("[") and v.endswith("]"):
-        v = v[1:-1]
-    parts = v.split(",")
-    result: List[int] = []
-    for p in parts:
-        p = p.strip()
-        if not p:
-            continue
-        try:
-            result.append(int(p))
-        except ValueError:
-            continue
-    return result
+    out = []
+    for part in s.split(","):
+        part = part.strip()
+        if part:
+            try:
+                out.append(int(part))
+            except ValueError:
+                pass
+    return out
 
 
-# -----------------------------
-# Truth Anchor schemas
-# -----------------------------
 class TruthAnchorCreate(BaseModel):
-    level: int = Field(..., ge=1, le=3)
-    statement: str = Field(..., min_length=1, max_length=1000)
-    scope: str = Field(default="global", max_length=64)
-    active: bool = True
+    level: int = Field(ge=1, le=3)
+    statement: str = Field(min_length=1)
+    scope: str = Field(default="global", min_length=1)
 
 
 class TruthAnchorOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
     id: int
     level: int
     statement: str
@@ -58,40 +55,39 @@ class TruthAnchorOut(BaseModel):
     active: bool
     created_at: datetime
 
-
-# Backwards/alternate friendly aliases
-AnchorCreate = TruthAnchorCreate
-AnchorOut = TruthAnchorOut
+    model_config = ConfigDict(from_attributes=True)
 
 
-# -----------------------------
-# Gate evaluate schemas
-# -----------------------------
+class AnchorOut(TruthAnchorOut):
+    pass
+
+
 class GateEvaluateIn(BaseModel):
-    request_summary: str = Field(..., min_length=1, max_length=2000)
-    arousal: Arousal = "unknown"
-    dominance: Dominance = "unknown"
+    request_summary: str = Field(min_length=1)
+    arousal: Arousal = Arousal.unknown
+    dominance: Dominance = Dominance.unknown
     profile_id: Optional[int] = None
+    override_reason: Optional[str] = None
 
 
 class GateEvaluateOut(BaseModel):
-    decision: Decision
+    decision: DecisionLiteral
     reason: str
-    # "wow" fields: only present when gated/refused
+    conflicted_anchor_ids: List[int] = []
+    log_id: int
+
+    trace_id: Optional[int] = None
     interpretation: Optional[str] = None
     suggestion: Optional[str] = None
     explanations: Optional[List[str]] = None
     next_actions: Optional[List[str]] = None
-    conflicted_anchor_ids: List[int] = Field(default_factory=list)
-    warnings: List[str] = Field(default_factory=list)
-    warning_anchors: List[TruthAnchorOut] = Field(default_factory=list)
-    log_id: int
-    trace_id: int | None = None 
+    ethos_refs: List[str] = []
+    warnings: List[str] = []
+    warning_anchors: List[AnchorOut] = []
+    enforcement_mode: Optional[str] = None
+    would_block: Optional[bool] = None
 
 
-# -----------------------------
-# Gate log read schemas
-# -----------------------------
 class GateLogOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -100,48 +96,42 @@ class GateLogOut(BaseModel):
     request_summary: str
     arousal: Arousal
     dominance: Dominance
-    decision: Decision
+    decision: DecisionLiteral
     reason: str
+    interpretation: str = ""
+    suggestion: str = ""
+    next_actions: List[str] = Field(default_factory=list)
     conflicted_anchor_ids: List[int] = Field(default_factory=list)
-    user_choice: str
-
-    @field_validator("conflicted_anchor_ids", mode="before")
-    @classmethod
-    def parse_ids(cls, v: object) -> List[int]:
-        """Accept either a CSV string (from the DB column) or an already-parsed list."""
-        if isinstance(v, str):
-            return parse_id_list(v)
-        return v  # type: ignore[return-value]
+    user_choice: str = ""
 
 
 class GateLogListOut(BaseModel):
     items: List[GateLogOut]
     total: int
-    limit: int
-    offset: int
 
 
 class GateReframeIn(BaseModel):
     log_id: int
-    new_intent: str = Field(..., min_length=1, max_length=2000)
-    # Optional: let caller override state, otherwise we reuse the original log state
+    new_intent: str
     arousal: Optional[Arousal] = None
     dominance: Optional[Dominance] = None
 
 
 class GateReframeOut(BaseModel):
-    parent_log_id: int
-    reframed_request_summary: str
-    decision: Decision
+    decision: DecisionLiteral
     reason: str
-    interpretation: str
-    suggestion: str
-    explanations: Optional[List[str]] = None
-    next_actions: List[str] = Field(default_factory=list)
-    conflicted_anchor_ids: List[int] = Field(default_factory=list)
-    warnings: List[str] = Field(default_factory=list)
-    warning_anchors: List[TruthAnchorOut] = Field(default_factory=list)
+    reframed_request: str
+    conflicted_anchor_ids: List[int] = []
     log_id: int
+    trace_id: Optional[int] = None
+
+    interpretation: Optional[str] = None
+    suggestion: Optional[str] = None
+    explanations: Optional[List[str]] = None
+    next_actions: Optional[List[str]] = None
+    ethos_refs: List[str] = []
+    warnings: List[str] = []
+    warning_anchors: List[AnchorOut] = []
 
 
 class ReplayOut(BaseModel):
@@ -149,29 +139,30 @@ class ReplayOut(BaseModel):
     same_decision: bool
     same_reason: bool
     same_explanation: bool
-
-    anchor_drift: List[str]
+    anchor_drift: Any
 
     decision_before: str
     decision_now: str
+
     reason_before: str
     reason_now: str
 
     explanation: str = ""
     match_debug: Any = None
 
+
 class PolicyProfileCreate(BaseModel):
     name: str
     description: Optional[str] = None
     is_default: Optional[bool] = False
-    
+    enforcement_mode: EnforcementMode = EnforcementMode.hard
 
 
 class PolicyProfileUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     is_default: Optional[bool] = None
-    
+    enforcement_mode: Optional[EnforcementMode] = None
 
 
 class PolicyProfileOut(BaseModel):
@@ -179,7 +170,7 @@ class PolicyProfileOut(BaseModel):
     name: str
     description: Optional[str]
     is_default: bool
-    
+    enforcement_mode: str
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -197,20 +188,12 @@ class ProfileAnchorsIn(BaseModel):
 class ProfileAnchorsOut(BaseModel):
     profile_id: int
     anchor_ids: List[int]
-class GateAcknowledgeIn(BaseModel):
-    log_id: int
-    acknowledgement: str = Field(..., min_length=1, max_length=500)
-    arousal: Optional[Arousal] = None
-    dominance: Optional[Dominance] = None
 
-class GateAcknowledgeOut(BaseModel):
-    parent_log_id: int
-    acknowledgement: str
-    decision: str
-    reason: str
-    interpretation: str
-    suggestion: str
-    next_actions: List[str] = Field(default_factory=list)
-    conflicted_anchor_ids: List[int] = Field(default_factory=list)
-    warnings: List[str] = Field(default_factory=list)
-    log_id: int
+
+class ShadowSummaryOut(BaseModel):
+    total_evaluated: int
+    total_l3_conflicts: int
+    total_l2_conflicts: int
+    total_would_block: int
+    total_overrides: int
+    top_triggered_anchors: List[dict]

@@ -1,15 +1,34 @@
 from typing import List, Tuple
 
-import numpy as np
-from sentence_transformers import SentenceTransformer
-from sklearn.metrics.pairwise import cosine_similarity
+# Lazy imports — only loaded when SW_MATCHER=embedding is active.
+# sentence_transformers requires PyTorch and is optional; naive matching is the default.
+_model = None
+_np = None
+_cosine_similarity = None
 
-# Load once at startup
 MODEL_NAME = "all-MiniLM-L6-v2"
-_model = SentenceTransformer(MODEL_NAME)
 
 
-def compute_embeddings(texts: List[str]) -> np.ndarray:
+def _load_model():
+    global _model, _np, _cosine_similarity
+    if _model is not None:
+        return
+    try:
+        import numpy as np
+        from sentence_transformers import SentenceTransformer
+        from sklearn.metrics.pairwise import cosine_similarity as _cs
+        _np = np
+        _cosine_similarity = _cs
+        _model = SentenceTransformer(MODEL_NAME)
+    except ImportError as e:
+        raise ImportError(
+            "SW_MATCHER=embedding requires sentence-transformers and scikit-learn. "
+            "Install them or switch back to SW_MATCHER=naive (the default)."
+        ) from e
+
+
+def compute_embeddings(texts: List[str]):
+    _load_model()
     # normalize_embeddings=True makes cosine similarity stable and fast
     return _model.encode(texts, convert_to_numpy=True, normalize_embeddings=True)
 
@@ -31,10 +50,10 @@ def find_conflicts_embedding(
 
     embeddings = compute_embeddings(texts)
 
-    request_vec = embeddings[0].reshape(1, -1)
+    request_vec = embeddings[0].reshape(1, -1)  # type: ignore[union-attr]
     anchor_vecs = embeddings[1:]
 
-    sims = cosine_similarity(request_vec, anchor_vecs)[0]
+    sims = _cosine_similarity(request_vec, anchor_vecs)[0]
 
     out: List[Tuple[object, float]] = []
     for anchor, score in zip(anchors, sims):

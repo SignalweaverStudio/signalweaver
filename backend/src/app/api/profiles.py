@@ -1,91 +1,175 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import select
-
+from fastapi import Request
+from sqlalchemy import delete
 from app.db import get_db
 from app.auth import get_tenant
-from app.models import PolicyProfile, Tenant, PolicyProfileAnchor, TruthAnchor
+from app.models import Tenant
+from app.models import PolicyProfile, PolicyProfileAnchor, TruthAnchor
 from app.schemas import (
     PolicyProfileCreate,
+    PolicyProfileUpdate,
     PolicyProfileOut,
     PolicyProfileListOut,
     ProfileAnchorsIn,
     ProfileAnchorsOut,
 )
 
+
 router = APIRouter()
 
 
-@router.post("/", response_model=PolicyProfileOut)
+@router.post("", response_model=PolicyProfileOut, status_code=201)
 def create_profile(payload: PolicyProfileCreate, db: Session = Depends(get_db), tenant: Tenant = Depends(get_tenant)):
-    profile = PolicyProfile(
-        name=payload.name,
-        description=payload.description or "",
-        active=True,
-        is_default=payload.is_default or False,
+    existing = db.scalar(
+        select(PolicyProfile).where(PolicyProfile.name == payload.name)
     )
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Profile with name '{payload.name}' already exists",
+        )
+
+    if payload.is_default:
+        for prof in db.scalars(
+            select(PolicyProfile).where(PolicyProfile.is_default == True)  # noqa: E712
+        ):
+            prof.is_default = False
+
+    profile = PolicyProfile(tenant_id=tenant.id,
+        name=payload.name,
+        description=payload.description,
+        is_default=payload.is_default or False,
+        enforcement_mode=payload.enforcement_mode.value,
+    )
+
     db.add(profile)
     db.commit()
     db.refresh(profile)
-    return profile
+
+    return PolicyProfileOut.model_validate(profile, from_attributes=True)
 
 
-@router.get("/", response_model=PolicyProfileListOut)
+@router.get("", response_model=PolicyProfileListOut)
 def list_profiles(db: Session = Depends(get_db), tenant: Tenant = Depends(get_tenant)):
-    rows = list(db.scalars(select(PolicyProfile).order_by(PolicyProfile.id)).all())
-    return PolicyProfileListOut(items=rows, total=len(rows))
+    profiles = list(db.scalars(select(PolicyProfile).where((PolicyProfile.tenant_id == tenant.id) | (PolicyProfile.tenant_id == None))).all())
+    return PolicyProfileListOut(
+        items=[
+            PolicyProfileOut.model_validate(p, from_attributes=True) for p in profiles
+        ],
+        total=len(profiles),
+    )
 
 
 @router.get("/{profile_id}", response_model=PolicyProfileOut)
-def get_profile(profile_id: int, db: Session = Depends(get_db), tenant: Tenant = Depends(get_tenant)):
+def get_profile(profile_id: int, db: Session = Depends(get_db)):
     profile = db.get(PolicyProfile, profile_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
-    return profile
+    return PolicyProfileOut.model_validate(profile, from_attributes=True)
 
 
-@router.post("/{profile_id}/anchors", response_model=ProfileAnchorsOut)
-def assign_anchors(profile_id: int, payload: ProfileAnchorsIn, db: Session = Depends(get_db), tenant: Tenant = Depends(get_tenant)):
+@router.patch("/{profile_id}", response_model=PolicyProfileOut)
+def update_profile(
+    profile_id: int,
+    payload: PolicyProfileUpdate,
+    db: Session = Depends(get_db),
+):
     profile = db.get(PolicyProfile, profile_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
 
-    # Verify all anchor IDs exist
-    for anchor_id in payload.anchor_ids:
-        if not db.get(TruthAnchor, anchor_id):
-            raise HTTPException(status_code=404, detail=f"Anchor {anchor_id} not found")
+    if payload.name is not None and payload.name != profile.name:
+        existing = db.scalar(
+            select(PolicyProfile).where(PolicyProfile.name == payload.name)
+        )
+        if existing:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Profile with name '{payload.name}' already exists",
+            )
+        profile.name = payload.name
 
-    # Clear existing assignments and replace
-    db.query(PolicyProfileAnchor).filter(
-        PolicyProfileAnchor.profile_id == profile_id
-    ).delete()
+    if payload.description is not None:
+        profile.description = payload.description
 
-    for i, anchor_id in enumerate(payload.anchor_ids):
-        db.add(PolicyProfileAnchor(
-            profile_id=profile_id,
-            anchor_id=anchor_id,
-            priority=i,
-            enabled=True,
-        ))
+    if payload.enforcement_mode is not None:
+        profile.enforcement_mode = payload.enforcement_mode.value
+
+    if payload.is_default is not None and payload.is_default:
+        for prof in db.scalars(
+            select(PolicyProfile).where(PolicyProfile.is_default == True)  # noqa: E712
+        ):
+            if prof.id != profile_id:
+                prof.is_default = False
+        profile.is_default = True
 
     db.commit()
-    return ProfileAnchorsOut(profile_id=profile_id, anchor_ids=payload.anchor_ids)
+    db.refresh(profile)
+
+    return PolicyProfileOut.model_validate(profile, from_attributes=True)
+
+
+@router.delete("/{profile_id}", status_code=204)
+def delete_profile(profile_id: int, db: Session = Depends(get_db)):
+    profile = db.get(PolicyProfile, profile_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    if profile.is_default:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete default profile. Set another profile as default first.",
+        )
+
+    db.delete(profile)
+    db.commit()
 
 
 @router.get("/{profile_id}/anchors", response_model=ProfileAnchorsOut)
-def get_profile_anchors(profile_id: int, db: Session = Depends(get_db), tenant: Tenant = Depends(get_tenant)):
+def get_profile_anchors(profile_id: int, db: Session = Depends(get_db)):
     profile = db.get(PolicyProfile, profile_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
 
-    rows = list(db.scalars(
-        select(PolicyProfileAnchor)
-        .where(PolicyProfileAnchor.profile_id == profile_id)
-        .where(PolicyProfileAnchor.enabled == True)  # noqa: E712
-        .order_by(PolicyProfileAnchor.priority)
-    ).all())
+    anchor_ids = [a.id for a in profile.anchors]
+    return ProfileAnchorsOut(profile_id=profile_id, anchor_ids=anchor_ids)
 
-    return ProfileAnchorsOut(
-        profile_id=profile_id,
-        anchor_ids=[r.anchor_id for r in rows],
+
+@router.put("/{profile_id}/anchors", response_model=ProfileAnchorsOut)
+def set_profile_anchors(
+    profile_id: int,
+    payload: ProfileAnchorsIn,
+    db: Session = Depends(get_db),
+):
+    profile = db.get(PolicyProfile, profile_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    if payload.anchor_ids:
+        existing_ids = set(
+            db.scalars(
+                select(TruthAnchor.id).where(TruthAnchor.id.in_(payload.anchor_ids))
+            ).all()
+        )
+        missing = set(payload.anchor_ids) - existing_ids
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Anchor IDs not found: {sorted(missing)}",
+            )
+
+    db.execute(
+        delete(PolicyProfileAnchor).where(
+            PolicyProfileAnchor.profile_id == profile_id
+        )
     )
+
+    for anchor_id in payload.anchor_ids:
+        db.add(PolicyProfileAnchor(profile_id=profile_id, anchor_id=anchor_id))
+
+    db.commit()
+    db.refresh(profile)
+    anchor_ids = [a.id for a in profile.anchors]
+    return ProfileAnchorsOut(profile_id=profile_id, anchor_ids=anchor_ids)

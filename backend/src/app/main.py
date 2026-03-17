@@ -1,17 +1,17 @@
-# SignalWeaver: boot check
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from app.routers.ethos import router as ethos_router
+from app.api.profiles import router as profiles_router
+from app.api.reports import router as reports_router
 
 from app.db import engine
 from app.models import Base
 from app.api.anchors import router as anchors_router
-from app.api.gate import router as gate_router
-from app.api.profiles import router as profiles_router
-from app.api.insight import router as insight_router
 from app.api.tenants import router as tenants_router
+from app.api.gate import router as gate_router
+
 app = FastAPI(title="SignalWeaver MVP")
 
 # Create tables
@@ -39,12 +39,9 @@ def tester():
     return html_path.read_text(encoding="utf-8")
 
 
-# Routers
-# Note: your routers already define their own paths (e.g. POST "/")
-# so we keep prefixes as they appear in Swagger: /anchors/* and /gate/*
+app.include_router(tenants_router, prefix="/tenants", tags=["tenants"])
 app.include_router(anchors_router, prefix="/anchors", tags=["anchors"])
 app.include_router(gate_router, prefix="/gate", tags=["gate"])
 app.include_router(profiles_router, prefix="/profiles", tags=["profiles"])
+app.include_router(reports_router, prefix="/reports", tags=["reports"])
 app.include_router(ethos_router, tags=["ethos"])
-app.include_router(insight_router, prefix="/insight", tags=["insight"])
-app.include_router(tenants_router, prefix="/tenants", tags=["tenants"])
