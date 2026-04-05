@@ -68,11 +68,8 @@ class GateEvaluateIn(BaseModel):
     dominance: Dominance = Dominance.unknown
     profile_id: Optional[int] = None
     override_reason: Optional[str] = None
-    novelty_score: Optional[float] = None
-    coherence_score: Optional[float] = None
-    enforcement_mode: Optional[str] = "hard"
-
-
+    novelty_score: Optional[float] = 0.0
+    coherence_score: Optional[float] = 0.0
 
 
 class GateEvaluateOut(BaseModel):

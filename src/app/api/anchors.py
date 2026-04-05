@@ -11,8 +11,14 @@ router = APIRouter()
 
 
 @router.post("/", response_model=TruthAnchorOut)
-def create_anchor(payload: TruthAnchorCreate, db: Session = Depends(get_db), tenant: Tenant = Depends(get_tenant)):
-    anchor = TruthAnchor(level=payload.level, statement=payload.statement, scope=payload.scope, tenant_id=tenant.id)
+def create_anchor(payload: TruthAnchorCreate, db: Session = Depends(get_db)):
+    anchor = TruthAnchor(
+        level=payload.level,
+        statement=payload.statement,
+        scope=payload.scope,
+        active=True,
+        tenant_id=None,
+    )
     db.add(anchor)
     db.commit()
     db.refresh(anchor)

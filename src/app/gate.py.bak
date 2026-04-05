@@ -51,20 +51,6 @@ def decide(
             next_actions=["cancel", "view_conflicts"],
             would_block=True,
         )
-    # Chaos Gate: high novelty but low coherence should be gated, not allowed through
-    if state.novelty_score >= 0.7 and state.coherence_score < 0.5:
-        return GateDecision(
-            decision="gate",
-            reason="unstable_novelty_detected",
-            conflicted_anchor_ids=conflicted_anchor_ids,
-            interpretation=(
-                "High novelty detected but coherence is critically low. "
-                "This suggests a potentially unstable or hallucinated request."
-            ),
-            suggestion="Pause and refine the request before proceeding.",
-            next_actions=["pause", "reframe", "view_trace"],
-            would_block=True,
-        )
 
     # --- 2. EXPLORE (The Emergence Lane) ---
     # Triggered if risk is low (L0/L1) but novelty and coherence are high.
@@ -169,15 +155,15 @@ def apply_enforcement_mode(
                 decision="gate",
                 reason=decision.reason,
                 conflicted_anchor_ids=decision.conflicted_anchor_ids,
-                interpretation="This request may lead to undesirable or harmful outcomes and requires review before proceeding.",
-suggestion="Pause and review this action with a human before continuing.",
+                interpretation=decision.interpretation,
+                suggestion=decision.suggestion,
                 next_actions=["override", "reframe", "view_conflicts"],
                 would_block=decision.would_block,
                 emergence_metadata=decision.emergence_metadata
             )
         return decision
 
-       # Hard mode: L3 auto-blocks, L2 is soft gate
+    # Hard mode: L3 auto-blocks, L2 is soft gate
     if mode == "hard":
         if max_level_conflict >= 3:
             if decision.decision == "refuse":
@@ -186,25 +172,23 @@ suggestion="Pause and review this action with a human before continuing.",
                 decision="gate",
                 reason=decision.reason,
                 conflicted_anchor_ids=decision.conflicted_anchor_ids,
-                interpretation="This request conflicts with a high-priority boundary and cannot proceed without intervention.",
-                suggestion="Reframe or cancel this action. Human review is required.",
+                interpretation=decision.interpretation,
+                suggestion=decision.suggestion,
                 next_actions=["reframe", "view_conflicts", "cancel"],
                 would_block=True,
                 emergence_metadata=decision.emergence_metadata
             )
-
         if max_level_conflict == 2:
             return GateDecision(
                 decision="gate",
                 reason=decision.reason,
                 conflicted_anchor_ids=decision.conflicted_anchor_ids,
-                interpretation="This request may lead to undesirable or harmful outcomes and requires review before proceeding.",
-                suggestion="Pause and review this action with a human before continuing.",
+                interpretation=decision.interpretation,
+                suggestion=decision.suggestion,
                 next_actions=["override", "reframe", "view_conflicts"],
                 would_block=decision.would_block,
                 emergence_metadata=decision.emergence_metadata
             )
-
         return decision
 
     return decision
