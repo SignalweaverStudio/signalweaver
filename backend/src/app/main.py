@@ -5,6 +5,8 @@ from fastapi.responses import HTMLResponse
 from app.routers.ethos import router as ethos_router
 from app.api.profiles import router as profiles_router
 from app.api.reports import router as reports_router
+from app.api.execute import router as execute_router
+from app.api.connectors import router as connectors_router
 
 from app.db import engine
 from app.models import Base
@@ -45,3 +47,5 @@ app.include_router(gate_router, prefix="/gate", tags=["gate"])
 app.include_router(profiles_router, prefix="/profiles", tags=["profiles"])
 app.include_router(reports_router, prefix="/reports", tags=["reports"])
 app.include_router(ethos_router, tags=["ethos"])
+app.include_router(execute_router, prefix="/execute", tags=["execute"])
+app.include_router(connectors_router, prefix="/connectors", tags=["connectors"])
