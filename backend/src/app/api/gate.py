@@ -812,3 +812,53 @@ def list_gate_logs(
         limit=limit,
         offset=offset,
     )
+
+def _detect_conflicts_v2(
+    request_text: str,
+    anchors: list[TruthAnchor],
+) -> tuple[list[TruthAnchor], dict]:
+    """
+    Phase 1: two-matcher competition with vote resolution.
+    Return type unchanged: tuple[list[TruthAnchor], dict]
+    """
+    from app.signals import (
+        naive_votes,
+        embedding_votes,
+        resolve_votes,
+        build_match_debug,
+    )
+
+    all_votes = []
+
+    votes_naive = naive_votes(
+        request_text,
+        anchors,
+        _naive_fn=naive_conflicts,
+        _norm_fn=_norm,
+    )
+    all_votes.extend(votes_naive)
+
+    votes_emb = embedding_votes(
+        request_text,
+        anchors,
+        threshold=0.50,
+    )
+    all_votes.extend(votes_emb)
+
+    resolved = resolve_votes(all_votes)
+
+    match_debug = build_match_debug(
+        all_votes,
+        resolved,
+        anchor_count=len(anchors),
+    )
+
+    conflict_ids_sorted = sorted(resolved.keys())
+    anchor_by_id = {a.id: a for a in anchors}
+    conflicts = [anchor_by_id[aid] for aid in conflict_ids_sorted if aid in anchor_by_id]
+
+    return conflicts, match_debug
+
+
+_detect_conflicts_v0 = _detect_conflicts
+_detect_conflicts = _detect_conflicts_v2
