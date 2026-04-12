@@ -72,7 +72,11 @@ def test_evaluate_returns_trace_id_and_gates_refund(monkeypatch):
     "dominance": "med",
 }
 
-        r = client.post("/gate/evaluate", json=payload, headers=auth_headers)
+        r = client.post(
+    "/gate/evaluate",
+    json=payload,
+    headers={"Authorization": "Bearer test"},
+)
 
         assert r.status_code == 200, r.text
         data = r.json()
