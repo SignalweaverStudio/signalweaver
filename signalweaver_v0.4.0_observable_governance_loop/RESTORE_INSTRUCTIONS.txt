@@ -1,0 +1,154 @@
+================================================================================
+RESTORE INSTRUCTIONS — SignalWeaver v0.4.0 Snapshot
+================================================================================
+
+OVERVIEW
+--------
+
+This archive contains the canonical source code for SignalWeaver. It should
+be unpacked into your local SignalWeaver repository root, replacing or
+aligning with your existing src/ tree.
+
+PREREQUISITES
+-------------
+
+  - Python 3.10 or later
+  - pip
+  - git (for version control)
+
+
+STEP 1: BACK UP YOUR LOCAL REPO (IMPORTANT)
+--------------------------------------------
+
+Before applying any changes from this snapshot, create a backup:
+
+  git stash                    # stash any uncommitted work
+  git checkout -b backup-pre-v0.4.0  # create a backup branch
+  git checkout main            # return to main
+
+
+STEP 2: UNPACK THE ARCHIVE
+---------------------------
+
+  unzip signalweaver_v0.4.0_observable_governance_loop.zip
+
+This creates a directory:
+  signalweaver_v0.4.0_observable_governance_loop/
+
+
+STEP 3: COPY FILES INTO YOUR LOCAL REPO
+----------------------------------------
+
+Copy the src/ directory contents into your repo root:
+
+  # From the unpacked archive directory:
+  cp -r src/ /path/to/your/signalweaver-repo/src/
+
+Copy root-level files (will overwrite existing):
+
+  cp requirements.txt /path/to/your/signalweaver-repo/
+  cp Dockerfile /path/to/your/signalweaver-repo/
+  cp docker-compose.yml /path/to/your/signalweaver-repo/
+  cp seed.py /path/to/your/signalweaver-repo/
+  cp README.md /path/to/your/signalweaver-repo/
+  cp ETHOS.md /path/to/your/signalweaver-repo/
+
+Copy docs/ (optional, for reference):
+
+  cp -r docs/ /path/to/your/signalweaver-repo/docs/
+
+OVERWRITE BEHAVIOUR
+-------------------
+
+  - src/app/*.py and src/app/api/*.py: OVERWRITE existing files
+  - src/app/connectors/*.py: OVERWRITE existing files
+  - src/tests/*.py: OVERWRITE existing files
+  - requirements.txt: OVERWRITE
+  - Dockerfile, docker-compose.yml: OVERWRITE
+  - README.md, ETHOS.md: OVERWRITE
+  - seed.py: OVERWRITE
+  - docs/: Will be created if it doesn't exist
+
+
+STEP 4: INSTALL DEPENDENCIES
+-----------------------------
+
+  cd /path/to/your/signalweaver-repo
+  python -m venv .venv
+  source .venv/bin/activate      # Linux/Mac
+  # or: .venv\Scripts\Activate   # Windows
+  pip install -r requirements.txt
+
+
+STEP 5: RUN TESTS
+-----------------
+
+  cd src
+  python -m pytest tests/ -v
+
+Expected: all tests should pass. If any fail, check for:
+  - Python version mismatch (requires 3.10+)
+  - Missing dependencies (pip install -r requirements.txt)
+  - Port 8000 already in use (tests use in-memory DB, not network)
+
+
+STEP 6: START THE SERVER
+-------------------------
+
+  # From the repo root:
+  cd src
+  python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+  # Or with Docker:
+  docker compose up --build
+
+Server runs at: http://localhost:8000
+Swagger UI:     http://localhost:8000/docs
+Gate Tester:    http://localhost:8000/tester
+
+
+STEP 7: SEED DEMO DATA (OPTIONAL)
+----------------------------------
+
+  python seed.py
+
+This creates sample anchors and profiles for testing.
+
+
+STEP 8: COMMIT TO YOUR REPO
+-----------------------------
+
+  git add -A
+  git status                              # review changes
+  git commit -m "Apply SignalWeaver v0.4.0 snapshot — Observable Governance Loop"
+
+
+FILE CONFLICTS
+--------------
+
+If you have local modifications that conflict with the snapshot files,
+use git's merge tools:
+
+  git diff src/app/main.py               # see what changed
+  git checkout --ours src/app/main.py    # keep your version
+  git checkout --theirs src/app/main.py  # use snapshot version
+
+The MANIFEST.txt in this archive lists every included file with its purpose,
+so you can verify what changed.
+
+
+TROUBLESHOOTING
+---------------
+
+Q: Tests fail with "ModuleNotFoundError: No module named 'app'"
+A: Ensure you're running pytest from the src/ directory, or set PYTHONPATH:
+     export PYTHONPATH=/path/to/repo/src
+     pytest src/tests/ -v
+
+Q: "Table already exists" error on startup
+A: Delete the SQLite database file (signalweaver.db) and restart.
+   Tables are auto-created from models.py on startup.
+
+Q: Tenant auth fails with 401
+A: Create a tenant first (POST /tenants/), then use the returned api_key
+   as a Bearer token in the Authorization header.

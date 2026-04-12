@@ -1,0 +1,199 @@
+================================================================================
+MANIFEST — SignalWeaver v0.4.0 Observable Governance Loop
+================================================================================
+
+Generated: 2026-04-06
+Total files: 39
+
+Format: relative_path | purpose
+
+--- APPLICATION CORE (src/app/) ---
+
+src/app/main.py
+  FastAPI application entrypoint. Registers all routers, creates DB tables.
+
+src/app/models.py
+  SQLAlchemy ORM models: Tenant, TruthAnchor, GateLog, PolicyProfile,
+  PolicyProfileAnchor, DecisionTrace, DecisionTraceAnchor, ExecutionLog,
+  AlertDispatchLog. 9 tables total.
+
+src/app/schemas.py
+  Pydantic v2 request/response schemas for all endpoints. Includes gate
+  evaluation, execution, analytics, timeseries, alerting, and alert dispatch.
+
+src/app/db.py
+  SQLite database engine with WAL mode. Provides get_db() generator.
+  Configurable via SIGNALWEAVER_DB env var.
+
+src/app/gate.py
+  Core deterministic decision logic: decide() and apply_enforcement_mode().
+  Supports three enforcement modes: shadow, soft, hard. Includes refuse
+  path for multi-L3 anchor conflicts.
+
+src/app/security.py
+  API key authentication (X-API-Key header) and per-IP rate limiting.
+  Dev mode (open access) when SW_API_KEY is not set.
+
+src/app/auth.py
+  Tenant Bearer token authentication. SHA-256 hashed API keys.
+  generate_api_key() and get_tenant() dependency.
+
+src/app/dependencies.py
+  Shared FastAPI dependency for database session (get_db).
+
+src/app/embedding_matcher.py
+  Optional semantic conflict detection using sentence-transformers.
+  Activated via SW_MATCHER=embedding env var. Lazy-loaded.
+
+src/app/tester.html
+  Browser-based UI for testing gate evaluation, reframing, log viewing,
+  and anchor management. Served at /tester.
+
+--- API ENDPOINTS (src/app/api/) ---
+
+src/app/api/__init__.py
+  Empty init file for Python package.
+
+src/app/api/gate.py
+  POST /gate/evaluate — Evaluate request against policy anchors.
+  POST /gate/reframe — Re-evaluate with new intent after a gate/refuse.
+  GET  /gate/replay/{trace_id} — Replay past decision, detect anchor drift.
+  GET  /gate/logs — Paginated gate log history with filters.
+  Contains shared _run_gate_evaluation() pipeline used by execute.py.
+
+src/app/api/execute.py
+  POST /execute/trusted — Gate-then-dispatch: runs gate evaluation,
+  dispatches to connector if allowed, writes ExecutionLog.
+  Decision mapping: proceed=execute, gate/refuse=blocked.
+
+src/app/api/analytics.py
+  GET  /executions — Paginated execution history.
+  GET  /executions/summary — Aggregate governance metrics.
+  GET  /executions/timeseries — Time-bucketed governance trends.
+  GET  /governance/insights — Top conflicted anchors & block reasons.
+  GET  /compliance/export — Full audit chain export.
+  GET  /alerts — Governance anomaly detection (thresholds + spikes).
+  POST /alerts/dispatch — Push alerts to external webhook.
+
+src/app/api/anchors.py
+  CRUD for TruthAnchor resources.
+  POST   /anchors/ — Create anchor.
+  GET    /anchors/ — List anchors (active-only or all).
+  GET    /anchors/{id} — Get single anchor.
+  POST   /anchors/{id}/archive — Deactivate anchor.
+
+src/app/api/tenants.py
+  POST   /tenants/ — Create tenant (returns API key).
+  GET    /tenants/ — List tenants.
+
+src/app/api/profiles.py
+  POST   /profiles/ — Create policy profile.
+  GET    /profiles/ — List profiles.
+  GET    /profiles/{id} — Get profile.
+  PATCH  /profiles/{id} — Update profile.
+  DELETE /profiles/{id} — Delete profile.
+  GET    /profiles/{id}/anchors — List assigned anchors.
+  PUT    /profiles/{id}/anchors — Set assigned anchors.
+
+src/app/api/reports.py
+  GET /reports/shadow-summary — Aggregate shadow mode statistics.
+
+--- CONNECTORS (src/app/connectors/) ---
+
+src/app/connectors/__init__.py
+  Package init. Exports Connector, MockConnector, WebhookConnector,
+  get_connector, CONNECTORS.
+
+src/app/connectors/base.py
+  Abstract Connector interface. Single method: execute(request) -> dict.
+
+src/app/connectors/mock.py
+  MockConnector: echoes request back. Used for testing. Always succeeds.
+
+src/app/connectors/webhook.py
+  WebhookConnector: real HTTP dispatch to configurable endpoints.
+  Validates URL scheme (http/https), method (POST/PUT/PATCH), timeout.
+  Optional HMAC-SHA256 request signing.
+
+src/app/connectors/redaction.py
+  8-pattern recursive sensitive field redaction.
+  Matches: authorization, token, api_key, apikey, secret, password,
+  signature, signing_secret. Returns deep copy with [REDACTED] markers.
+
+src/app/connectors/signing.py
+  HMAC-SHA256 request signing. Produces X-SignalWeaver-Signature and
+  X-SignalWeaver-Timestamp headers. Uses only stdlib.
+
+src/app/connectors/registry.py
+  Connector factory. Maps names ("mock", "webhook") to Connector instances.
+  Raises ValueError for unknown connector names.
+
+--- ROUTERS (src/app/routers/) ---
+
+src/app/routers/ethos.py
+  GET /ethos — Returns plain-text governance invariants from ETHOS.md.
+
+--- TEST SUITE (src/tests/) ---
+
+src/tests/conftest.py
+  Shared test fixtures: in-memory SQLite, TestClient, DB session.
+  Overrides get_db dependency for all tests.
+
+src/tests/test_gate_smoke.py
+  Gate endpoint smoke tests: health check, evaluation, log listing.
+
+src/tests/test_gate_flow.py
+  Decision flow integration tests: proceed, gate, refuse, replay, reframe.
+
+src/tests/test_refuse.py
+  Refusal path tests: multi-L3 conflicts, refuse-then-reframe rejection.
+
+src/tests/test_remediation.py
+  Remediation path tests: reframe from gate to proceed.
+
+src/tests/test_execution.py
+  Execution layer tests: proceed→executed, gate→blocked, connector dispatch.
+
+src/tests/test_api_smoke.py
+  General API smoke tests: tenant creation, anchor CRUD, profile management.
+
+src/tests/test_analytics.py
+  Analytics endpoint tests: execution history, summary, insights, compliance.
+
+src/tests/test_webhook.py
+  Webhook connector tests: config validation, HTTP dispatch, error handling.
+
+src/tests/test_secure_dispatch.py
+  Redaction and signing tests: 8-pattern redaction, HMAC-SHA256 signing.
+
+src/tests/test_alerting.py
+  Alerting logic tests: threshold evaluation, spike detection, window parsing.
+
+src/tests/test_alert_dispatch.py
+  Alert dispatch E2E tests: compute alerts + webhook delivery + audit log.
+
+--- ROOT FILES ---
+
+requirements.txt
+  Python dependencies: fastapi, uvicorn, sqlalchemy, pydantic, requests, httpx.
+
+Dockerfile
+  Python 3.10-slim container. Copies src/, installs deps, runs uvicorn.
+
+docker-compose.yml
+  Single-service config. Exposes port 8000, mounts data volume.
+
+seed.py
+  Demo bootstrapper: creates sample anchors and profiles via API calls.
+
+README.md
+  Project README with architecture, quickstart, API reference.
+
+ETHOS.md
+  Governance invariants document (10 principles).
+
+--- DOCUMENTATION (docs/) ---
+
+docs/STAGE22_STABILIZATION_REPORT.pdf
+  Full Stage 22 stabilization and verification report.
+================================================================================
