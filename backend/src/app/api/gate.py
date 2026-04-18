@@ -145,13 +145,16 @@ def _max_money_amount(text: str) -> float:
             continue
     return max_amt
 
+
 def naive_conflicts(request_summary: str, anchors: list[TruthAnchor]) -> list[TruthAnchor]:
     req_norm = _norm(request_summary)
     req_has_not = _has_not(req_norm)
     req_wo_not = _strip_not(req_norm)
-    # --- Domain heuristic: refunds over £100 ---
+
+    # --- Domain heuristic: refunds over ?100 ---
     refund_hit = _has_refund_word(request_summary)
     max_amt = _max_money_amount(request_summary)
+
     # Detect "safe lockout" intent (legal next steps, avoid forced entry)
     safe_markers = {
         "legal", "lawful", "licensed", "locksmith", "roadside", "assistance",
@@ -173,10 +176,22 @@ def naive_conflicts(request_summary: str, anchors: list[TruthAnchor]) -> list[Tr
     req_token_set = set(req_tokens)
     req_bigrams = _bigrams(req_tokens)
 
+    forced_entry_vehicle = (
+        ("forced entry" in req_norm)
+        and (
+            ("car" in req_norm)
+            or ("cars" in req_norm)
+            or ("vehicle" in req_norm)
+            or ("vehicles" in req_norm)
+        )
+    )
+
     # High-risk normalization: map common bypass phrasing to canonical bigrams
     if ("bypass" in req_norm) and (("lock" in req_norm) or ("key" in req_norm)):
         req_bigrams.add("break into")
     if ("unlock" in req_norm) and ("without" in req_norm) and ("key" in req_norm):
+        req_bigrams.add("break into")
+    if forced_entry_vehicle:
         req_bigrams.add("break into")
 
     hits: list[TruthAnchor] = []
@@ -206,6 +221,12 @@ def naive_conflicts(request_summary: str, anchors: list[TruthAnchor]) -> list[Tr
 
         if bigram_overlap >= 1 or token_overlap >= 2:
             hits.append(a)
+            continue
+
+        if forced_entry_vehicle and any(
+            p in stmt_norm for p in ("break into", "breaking into cars", "break in")
+        ):
+            hits.append(a)
 
     # FIX 7: access .active and .scope directly instead of via getattr for consistency
     if refund_hit and max_amt > 100:
@@ -213,6 +234,7 @@ def naive_conflicts(request_summary: str, anchors: list[TruthAnchor]) -> list[Tr
             if a.active and a.scope == "payments.refunds":
                 if a not in hits:
                     hits.append(a)
+
     return hits
 
 
@@ -813,12 +835,14 @@ def list_gate_logs(
         offset=offset,
     )
 
+
 def _detect_conflicts_v2(
     request_text: str,
     anchors: list[TruthAnchor],
 ) -> tuple[list[TruthAnchor], dict]:
     """
-    Phase 1: two-matcher competition with vote resolution.
+    Phase 1/2: two-matcher competition with vote resolution.
+    Phase 2 (confidence-aware) activates via SW_SIGNALS_PHASE2 env var.
     Return type unchanged: tuple[list[TruthAnchor], dict]
     """
     from app.signals import (
@@ -826,6 +850,15 @@ def _detect_conflicts_v2(
         embedding_votes,
         resolve_votes,
         build_match_debug,
+        PHASE2_OVERRIDE_THRESHOLD,
+    )
+
+    # Parse Phase 2 mode
+    phase2_mode = os.getenv("SW_SIGNALS_PHASE2", "false").lower()
+    phase2_active = phase2_mode in ("true", "1", "yes")
+    phase2_shadow = phase2_mode == "shadow"
+    phase2_threshold = float(
+        os.getenv("SW_PHASE2_OVERRIDE_THRESHOLD", "0.85")
     )
 
     all_votes = []
@@ -845,19 +878,58 @@ def _detect_conflicts_v2(
     )
     all_votes.extend(votes_emb)
 
-    resolved = resolve_votes(all_votes)
+    # Phase 1 resolver (always computed ? live result unless Phase 2 active)
+    resolved, reasons = resolve_votes(
+        all_votes, phase2_enabled=False,
+    )
 
     match_debug = build_match_debug(
         all_votes,
         resolved,
         anchor_count=len(anchors),
+        resolution_reasons=reasons,
     )
+
+    # Phase 2: compute if enabled or in shadow mode
+    if phase2_active or phase2_shadow:
+        resolved_p2, reasons_p2 = resolve_votes(
+            all_votes, phase2_enabled=True,
+        )
+
+        if phase2_shadow:
+            # Shadow: live decision stays Phase 1, log Phase 2 comparison
+            p1_ids = set(resolved.keys())
+            p2_ids = set(resolved_p2.keys())
+            would_change = sorted(p2_ids - p1_ids)
+
+            match_debug["phase2_active"] = True
+            match_debug["phase2_threshold"] = phase2_threshold
+            match_debug["phase2_shadow"] = {
+                "active": True,
+                "would_change": would_change,
+                "phase1_conflicts": sorted(p1_ids),
+                "phase2_conflicts": sorted(p2_ids),
+            }
+        else:
+            # Live Phase 2: replace Phase 1 results
+            resolved = resolved_p2
+            reasons = reasons_p2
+
+            match_debug = build_match_debug(
+                all_votes,
+                resolved,
+                anchor_count=len(anchors),
+                resolution_reasons=reasons,
+                phase2_active=True,
+                phase2_threshold=phase2_threshold,
+            )
 
     conflict_ids_sorted = sorted(resolved.keys())
     anchor_by_id = {a.id: a for a in anchors}
     conflicts = [anchor_by_id[aid] for aid in conflict_ids_sorted if aid in anchor_by_id]
 
     return conflicts, match_debug
+
 
 
 _detect_conflicts_v0 = _detect_conflicts
