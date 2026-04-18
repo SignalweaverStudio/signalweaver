@@ -1,0 +1,1 @@
+# analysis package -- offline utilities for SignalWeaver evaluation data
