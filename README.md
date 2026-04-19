@@ -1,363 +1,250 @@
-# SignalWeaver
+SignalWeaver
+A governance layer that sits between AI and action.
 
-![Python](https://img.shields.io/badge/python-3.10+-blue)
-![FastAPI](https://img.shields.io/badge/framework-FastAPI-009688)
-![License](https://img.shields.io/badge/license-MIT-green)
+SignalWeaver evaluates requests against declared policy, produces a deterministic decision, and records a replayable trace for audit. It doesn't classify content. It doesn't align models. It governs what AI agents are allowed to do.
 
-**Your AI agents are making decisions. Can you prove they made the right ones?**
-
-AI governance for teams who can't afford to be wrong.
-
-SignalWeaver is a deterministic policy enforcement layer for AI systems.
-It evaluates requests against structured **Truth Anchors**, produces a
-clear **decision outcome**, and records a **replayable trace** for audit
-and analysis.
-
-**Core capabilities**
-
-- Deterministic decision engine (no hidden model behaviour)
-- Policy enforcement using structured Truth Anchors
-- Replayable decision traces for auditability
-- Insight analytics to analyse policy effectiveness
-- FastAPI service designed to sit between AI agents and real-world actions
-
----
-
-## What it does
-
-- **Policy enforcement** — human-written rules, checked before every action
-- **Deterministic decisions** — same input always produces the same output
-- **Replayable traces** — any past decision can be reconstructed exactly and audited later
-- **No model dependency** — rules are plain text, not prompts. Model behaviour doesn't affect enforcement.
-- **SignalWeaver does for AI decisions what firewalls do for network traffic.
-
----
-
-## Why this exists
-
-AI systems are increasingly allowed to trigger real-world actions:
-
-• approving refunds  
-• granting system access  
-• executing automated workflows  
-• moderating content  
-• triggering financial or operational events  
-
-Most teams have **no deterministic policy layer** governing those decisions.
+The problem
+AI agents are increasingly allowed to trigger real-world actions — approving refunds, executing trades, granting access, deleting data, sending emails. Most teams have no deterministic policy layer governing those decisions. When something goes wrong, there's no audit trail, no explanation, and no way to prove what happened.
 
 SignalWeaver provides that layer.
 
-It ensures that every automated decision can be:
+What it does
+Deterministic decisions — same input, same policy, always the same output. No model non-determinism in the enforcement path.
+Three enforcement tiers — proceed, gate (hold for review), refuse (hard block). Not binary. Not pass/fail. Governance.
+Replayable traces — every decision is logged with a full anchor snapshot. Re-run any past decision to detect policy drift.
+Explainable outcomes — every gate names the anchor that triggered, the phrases that matched, and the reasoning path. No black boxes.
+Policy profiles — different contexts, different rules. A payments profile gates financial actions. A security profile gates access. Same engine.
+Insight analytics — which rules trigger most, where overrides cluster, which anchors are dead, counterfactual simulation of policy changes against real decision history.
+Governance spectrum — run in shadow mode (observe, never block), soft mode (gate with override), or hard mode (full enforcement). Start in shadow. Turn it up when you're ready.
+How it works
+AI Agent proposes action
+↓
+SignalWeaver /gate/evaluate
+↓
+Load active policy anchors
+↓
+Detect conflicts (keyword or semantic matching)
+↓
+Run deterministic decision logic
+↓
+Apply enforcement mode (shadow / soft / hard)
+↓
+Return decision + explanation + trace ID
+↓
+Decision logged with full anchor snapshot
 
-- evaluated against explicit policy anchors  
-- explained in plain language  
-- replayed deterministically  
-- analysed for policy effectiveness
+text
 
-## Architecture
 
-```mermaid
-flowchart LR
-    UserRequest["User / AI Request"]
-    AIModel["AI Model or Agent"]
-    SignalWeaver["SignalWeaver Gate"]
-    Anchors["Truth Anchors (Policies)"]
-    DecisionLog["Decision Trace Log"]
-    Insight["Insight Analytics"]
-
-    UserRequest --> AIModel
-    AIModel --> SignalWeaver
-    SignalWeaver --> Anchors
-    Anchors --> SignalWeaver
-    SignalWeaver --> DecisionLog
-    DecisionLog --> Insight
-```
-
-SignalWeaver sits between AI systems and the actions they trigger,
-enforcing deterministic policy checks before execution.
-
----
-
-## Decision Flow
-
-```mermaid
-flowchart TD
-    Request["Incoming Request"]
-    LoadAnchors["Load Active Anchors"]
-    Match["Evaluate Request Against Anchors"]
-    Conflict{"Conflict Detected?"}
-    Proceed["Decision: Proceed"]
-    Gate["Decision: Gate"]
-    Refuse["Decision: Refuse"]
-    Log["Write Decision Trace"]
-
-    Request --> LoadAnchors
-    LoadAnchors --> Match
-    Match --> Conflict
-    Conflict -->|No| Proceed
-    Conflict -->|L2| Gate
-    Conflict -->|L3| Refuse
-    Proceed --> Log
-    Gate --> Log
-    Refuse --> Log
-```
+Every decision produces:
+- A clear outcome: `proceed`, `gate`, or `refuse`
+- A human-readable explanation of what triggered and why
+- A trace ID for audit and replay
+- Ethos references linking the decision to declared system invariants
 
 ---
 
 ## Quick example
 
-You have an AI customer support agent that can approve refunds. Your policy: refunds above £10,000 need a human to sign off.
+**1. Create a policy anchor:**
 
-**1. Create the policy anchor:**
+```bash
+curl -X POST http://localhost:8000/anchors/ \
+  -H "Authorization: Bearer <api-key>" \
+  -H "Content-Type: application/json" \
+  -d '{"level": 3, "statement": "Do not approve refunds above £10000 without manual review", "scope": "payments.refunds"}'
+2. AI proposes a £12,000 refund — evaluate it:
 
-```powershell
-Invoke-RestMethod -Uri "http://localhost:8000/anchors" `
-  -Method POST -ContentType "application/json" `
-  -Body '{"level": 3, "statement": "Do not approve refunds above £10000 without manual review", "scope": "payments.refunds"}'
-```
+bash
 
-**2. AI proposes a £12,000 refund — evaluate it:**
-
-```powershell
-Invoke-RestMethod -Uri "http://localhost:8000/gate/evaluate" `
-  -Method POST -ContentType "application/json" `
-  -Body '{"request_summary": "Approve refund of £12000 for customer", "arousal": "unknown", "dominance": "unknown"}'
-```
-
+curl -X POST http://localhost:8000/gate/evaluate \
+  -H "Authorization: Bearer <api-key>" \
+  -H "Content-Type: application/json" \
+  -d '{"request_summary": "Approve refund of £12000 for customer", "arousal": "unknown", "dominance": "unknown"}'
 Response:
-```json
+
+json
+
 {
   "decision": "gate",
   "reason": "l3_anchor_conflict",
   "trace_id": 1,
   "interpretation": "This conflicts with a level-3 boundary (protected constraint).",
-  "explanations": ["Anchor L3 (payments.refunds): triggered by refund amount above threshold"]
+  "explanations": ["Anchor L3 (payments.refunds): triggered by refund amount above threshold"],
+  "next_actions": ["reframe", "view_conflicts", "cancel"],
+  "ethos_refs": ["Explainability over opacity", "Reversibility", "Slow is a feature"]
 }
-```
+The refund is held. The decision is logged. The reasoning is transparent.
 
-The refund is held for human review. The decision is logged.
+3. Prove it was handled correctly:
 
-**3. Later, prove it was handled correctly:**
+bash
 
-```powershell
-Invoke-RestMethod -Uri "http://localhost:8000/gate/replay/1" -Method GET
-```
+curl http://localhost:8000/gate/replay/1 \
+  -H "Authorization: Bearer <api-key>"
+json
 
-```json
 {
   "trace_id": 1,
   "same_decision": true,
   "same_reason": true,
   "anchor_drift": []
 }
-```
+Decision outcomes
+Decision
+When
+User path
+proceed	No policy conflicts detected	Continue normally
+gate	Conflicts with a protected constraint	Reframe intent, acknowledge risk, or cancel
+refuse	Multiple protected constraints violated simultaneously	No reframing path — action blocked
 
----
-
-## Decision outcomes
-
-| Decision | When |
-|---|---|
-| `proceed` | No policy conflicts detected |
-| `gate` | Conflicts with a protected constraint — hold for human review |
-| `refuse` | Multiple protected constraints violated — block entirely |
-
----
-
-## Policy anchors
-
+Policy anchors
 Anchors are your policy rules. Each one has:
 
-- `level` (1–3) — how strictly it's enforced. Level 3 = hard gate or refuse.
-- `statement` — the rule in plain language
-- `scope` — domain tag (e.g. `payments.refunds`, `access.admin`, `global`)
-- `active` — toggle on/off without deletion
-
+level (1–3) — how strictly it's enforced
+Level 3: protected constraint — gate or refuse
+Level 2: policy constraint — soft gate with override option
+Level 1: advisory — proceeds with warning
+statement — the rule in plain language
+scope — domain tag (e.g. payments.refunds, access.admin, global)
+active — toggle on/off without deletion
 Anchors are stored in the database and evaluated on every request. They're not prompts — model behaviour doesn't change how they're evaluated.
 
----
+Key capabilities
+Replay and drift detection. Every decision snapshots the full policy state at evaluation time. Replay any trace to detect if anchor hashes changed, active flags flipped, or new anchors were added since the original decision. Silent policy drift is surfaced.
 
-## Insight (decision analytics)
+Counterfactual policy testing. Simulate how policy changes would have affected historical decisions before deploying them. "What would have happened if we tightened this rule?" — answered against real decision data, not guesswork.
 
-SignalWeaver can analyse historical decisions using the Insight endpoints.
+Multi-tenant isolation. API key authentication with tenant-scoped anchors and profiles. Each tenant's policy context is isolated.
 
-These allow teams to understand:
+Embedding matcher (optional). Switch from keyword matching to semantic similarity with SW_MATCHER=embedding. Uses sentence-transformers for vector-based conflict detection. Falls back to keyword matching automatically if no semantic matches are found.
 
-• which rules trigger most often
-• where human overrides occur
-• whether policies drift over time
-• which anchors are unused
+Insight analytics. Decision volume, gate/refuse rates, override rates per anchor, dead anchor detection, and participation tracking. Turns decision logs into operational intelligence.
 
-This turns decision logs into operational intelligence rather than just an audit trail.
+Governance modes
+Mode
+Behaviour
+shadow	Evaluate and log everything — never block. See what would have been caught.
+soft	Gate on policy-sensitive decisions, allow override with recorded acknowledgement.
+hard	Full enforcement. Gate and refuse as defined.
 
----
+Most teams start in shadow mode for a week or two. Understand what the engine catches before turning on enforcement. Zero interference with existing workflows.
 
-## Counterfactual Policy Testing
+API reference
+Gate
 
-SignalWeaver can simulate how policy changes would have affected historical decisions.
+Method
+Endpoint
+Description
+POST	/gate/evaluate	Evaluate a request against policy
+POST	/gate/reframe	Re-evaluate a gated request with new intent
+GET	/gate/replay/{trace_id}	Replay a past decision and check for drift
+GET	/gate/logs	List decision logs with filters
 
-This allows teams to safely test new rules before deploying them.
+Anchors
 
-Example:
+Method
+Endpoint
+Description
+POST	/anchors/	Create a policy anchor
+GET	/anchors/	List active anchors
+GET	/anchors/{id}	Get a specific anchor
+POST	/anchors/{id}/archive	Deactivate an anchor
 
-```json
-POST /insight/counterfactual
+Profiles
 
-{
-  "trace_ids": [190,191,192],
-  "proposed_changes": [
-    {
-      "anchor_id": 8,
-      "new_statement": "Actions causing financial harm must always be gated."
-    }
-  ]
-}
-```
+Method
+Endpoint
+Description
+POST	/profiles/	Create a named policy profile
+GET	/profiles/	List profiles
+PATCH	/profiles/{id}	Update a profile
+DELETE	/profiles/{id}	Delete a profile
+PUT	/profiles/{id}/anchors	Assign anchors to a profile
 
-Response:
+Tenants
 
-```
-trace_id  original  counterfactual  changed
-190       gate      refuse          true
-191       gate      refuse          true
-192       proceed   proceed         false
-```
+Method
+Endpoint
+Description
+POST	/tenants/	Create a tenant (returns API key)
+GET	/tenants/	List tenants
 
-This allows teams to answer questions like:
+Insight
 
-- *What would have happened if we tightened this rule?*
-- *Would a new policy reduce risky approvals?*
-- *Would it cause excessive blocking?*
+Method
+Endpoint
+Description
+GET	/reports/shadow-summary	Decision analytics summary
 
-Instead of guessing, teams can **test policies against real decision history.**
+Getting started
+Requirements: Python 3.10+, Docker (optional)
 
----
-## Getting started
+1. Clone and set up:
 
-Requirements: Python 3.10+, Windows (PowerShell) or Linux/Mac
+bash
 
-**1. Clone and set up:**
-
-```powershell
-git clone <repo-url>
-cd signalweaver-fresh
+git clone https://github.com/SignalweaverStudio/signalweaver.git
+cd signalweaver
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+source .venv/bin/activate  # Linux/Mac
 pip install -r requirements.txt
-```
+2. Start the server:
 
-**2. Start the server:**
+bash
 
-```powershell
-.\run.ps1
-```
+cd src
+uvicorn app.main:app --reload
+Server runs at http://localhost:8000. Swagger UI at http://localhost:8000/docs.
 
-Server runs at `http://localhost:8000`. Swagger UI at `http://localhost:8000/docs`.
+3. Docker:
 
-**3. Run tests:**
+bash
 
-```powershell
+docker-compose up
+4. Run tests:
+
+bash
+
 cd src
 python -m pytest tests/ -v
-```
+Architecture
+Core: FastAPI + SQLAlchemy + SQLite
+Decision engine: Pure Python, deterministic, no model dependency
+Matching: Keyword (default) or sentence-transformers embedding (optional)
+Auth: Bearer token with tenant-scoped API keys
+Storage: SQLite (dev), portable to PostgreSQL
+Design invariants
+SignalWeaver operates under 10 declared invariants that constrain every feature. These aren't aspirational — they're enforced in code.
 
----
+Agency first — the system may refuse, gate, or invite reconsideration. It must not coerce.
+Reversibility — every gate leaves the user in a stable state.
+Truthful memory — decisions resist revisionism. If a decision can't be justified on replay, it shouldn't have been made.
+Explainability over opacity — every gate names what triggered it and why.
+Refusal is a valid act — gates and refusals are treated with the same seriousness as approvals.
+Consent over silence — if a boundary is crossed, the crossing is explicit and on record.
+Anti-coercion — a gate is information, not punishment.
+Slow is a feature — friction is appropriate when stakes are high.
+Minimal necessary intervention — do the smallest safe thing.
+Auditability — the system must be inspectable at any point.
+See ETHOS.md for the full text.
 
-## Governance modes
+Use cases
+AI customer support agents approving refunds or credits
+AI agents executing tool calls (file deletion, payments, shell commands)
+AI systems granting or denying access to resources
+Automated workflows that touch money, access, or compliance
+Any AI decision that needs to be explainable to an auditor
+Project status
+SignalWeaver is under active development. The core decision engine, replay system, insight analytics, and multi-tenant auth are operational.
 
-Run SignalWeaver in three modes:
+The system is governance-ready but not yet production-hardened. If you're running AI agents in production and want to evaluate SignalWeaver as a governance layer, that's exactly the conversation we're looking for.
 
-| Mode | Behaviour |
-|---|---|
-| `shadow` | Evaluate and log everything — no blocking. See what would have been caught. |
-| `soft` | Gate on policy-sensitive decisions, let the rest through. |
-| `hard` | Full enforcement. Gate and refuse as defined. |
+Contact: signalweaver.studio@gmail.com
 
-Most teams start in **shadow mode** for a week or two. You understand what the engine catches before turning on enforcement. Zero interference with existing workflows.
-
----
-
-## API reference
-
-**Anchors**
-
-| Method | Endpoint | Description |
-|---|---|---|
-| POST | `/anchors/` | Create a policy anchor |
-| GET | `/anchors/` | List active anchors |
-| GET | `/anchors/{id}` | Get a specific anchor |
-| POST | `/anchors/{id}/archive` | Deactivate an anchor |
-
-**Gate**
-
-| Method | Endpoint | Description |
-|---|---|---|
-| POST | `/gate/evaluate` | Evaluate a request against policy |
-| POST | `/gate/reframe` | Re-evaluate a gated request with new intent |
-| GET | `/gate/replay/{trace_id}` | Replay a past decision and check for drift |
-| GET | `/gate/logs` | List decision logs |
-
-**Profiles**
-
-| Method | Endpoint | Description |
-|---|---|---|
-| POST | `/profiles/` | Create a named policy profile |
-| GET | `/profiles/` | List profiles |
-| POST | `/profiles/{id}/anchors` | Assign anchors to a profile |
-
----
-
-## Optional: embedding matcher
-
-By default, SignalWeaver uses keyword-based conflict detection. For semantic matching:
-
-```powershell
-$env:SW_MATCHER = "embedding"
-.\run.ps1
-```
-
-Requires `sentence-transformers` and `scikit-learn`:
-
-```powershell
-pip install sentence-transformers scikit-learn
-```
-
----
-
-## Use cases
-
-- AI customer support agents approving refunds or credits
-- AI systems granting or denying access to resources
-- AI agents executing automated workflows on behalf of users
-- Any automated decision that touches money, access, or compliance
-
----
-
-## Project status
-
-SignalWeaver is under active development.
-
-The current repository contains the core **decision engine**, **policy anchor system**, and **Insight analytics layer**.
-
-Future work includes:
-
-- multi-tenant policy management
-- deployment templates
-- enterprise audit tooling
-- hosted control plane
-
-**Not yet implemented:** authentication, multi-tenancy, production hardening.
-
-This is intentional. The engine works. The productisation layer is in progress. If you're running AI agents in production and want to evaluate SignalWeaver as a governance layer before it's fully hardened, that's exactly the kind of conversation we're looking for.
-
-→ **signalweaver.studio@gmail.com**
-
----
-
-## License
-
+License
 Experimental. Not production hardened.
 
 Commercial use requires OEM licensing. Contact: licensing@signalweaver.io
 
-See `DEMO.md` for a full walkthrough including reframing, profile scoping, and drift detection.
+See LICENSING.md for details.
