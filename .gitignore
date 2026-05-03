@@ -162,3 +162,17 @@ payload.json
 CLAUDE.md
 repo_structure.txt
 WRITE_COMMIT1_CONNECTORS.ps1
+# Local DB + WAL
+*.db
+*.db-shm
+*.db-wal
+
+# Trace files
+traces_*.json
+
+# Linux temp files
+.fuse_hidden*
+
+# Local scripts / notes (optional)
+demo_helpers.ps1
+Write-Phase2Analysis.ps1
