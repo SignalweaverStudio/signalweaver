@@ -1,5 +1,10 @@
 # SignalWeaver
 
+Live demo:
+https://signalweaver-site.vercel.app
+
+This repository contains the backend decision engine that powers the live demo.
+
 ![Python](https://img.shields.io/badge/python-3.10+-blue)
 ![FastAPI](https://img.shields.io/badge/framework-FastAPI-009688)
 ![License](https://img.shields.io/badge/license-MIT-green)
