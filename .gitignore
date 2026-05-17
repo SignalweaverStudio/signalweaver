@@ -176,3 +176,5 @@ traces_*.json
 # Local scripts / notes (optional)
 demo_helpers.ps1
 Write-Phase2Analysis.ps1
+
+*.zip
