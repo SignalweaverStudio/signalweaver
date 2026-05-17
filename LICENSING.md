@@ -1,4 +1,4 @@
-\# SignalWeaver Licensing
+# SignalWeaver Licensing
 
 
 
@@ -14,7 +14,7 @@ This repository contains the core engine for evaluation, traceability, and deter
 
 
 
-\## Permitted Use (Open Evaluation)
+## Permitted Use (Open Evaluation)
 
 
 
@@ -22,13 +22,13 @@ You may:
 
 
 
-\- Clone and run locally for evaluation
+- Clone and run locally for evaluation
 
-\- Test functionality
+- Test functionality
 
-\- Build internal proofs of concept
+- Build internal proofs of concept
 
-\- Review architecture for due diligence
+- Review architecture for due diligence
 
 
 
@@ -36,7 +36,7 @@ You may:
 
 
 
-\## Commercial / OEM Use
+## Commercial / OEM Use
 
 
 
@@ -44,13 +44,13 @@ The following require a commercial license agreement:
 
 
 
-\- Redistribution of SignalWeaver binaries or containers
+- Redistribution of SignalWeaver binaries or containers
 
-\- Embedding SignalWeaver in a commercial product
+- Embedding SignalWeaver in a commercial product
 
-\- Offering SignalWeaver as part of a paid SaaS platform
+- Offering SignalWeaver as part of a paid SaaS platform
 
-\- White-label or OEM integration
+- White-label or OEM integration
 
 
 
@@ -58,13 +58,13 @@ SignalWeaver is designed for:
 
 
 
-\- Deterministic boundary enforcement
+- Deterministic boundary enforcement
 
-\- Audit-ready policy decision logging
+- Audit-ready policy decision logging
 
-\- Traceability-first AI governance layers
+- Traceability-first AI governance layers
 
-\- On-prem compliance deployments (including EU AI Act contexts)
+- On-prem compliance deployments (including EU AI Act contexts)
 
 
 
@@ -74,7 +74,7 @@ For OEM licensing, integration support, or enterprise deployment:
 
 Contact: licensing@signalweaver.io  
 
-(placeholder — update before public promotion)
+(placeholder - update before public promotion)
 
 
 
@@ -82,7 +82,7 @@ Contact: licensing@signalweaver.io
 
 
 
-\## Intellectual Property
+## Intellectual Property
 
 
 
@@ -98,7 +98,7 @@ of the SignalWeaver project owner.
 
 
 
-\## Status
+## Status
 
 
 
