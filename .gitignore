@@ -184,3 +184,6 @@ tools/validation/**/*.pyc
 tools/validation/results*/
 tools/validation/debug/
 tools/validation/reports/
+
+# Local working notes
+.local-notes/
