@@ -178,3 +178,9 @@ demo_helpers.ps1
 Write-Phase2Analysis.ps1
 
 *.zip
+
+# Validation outputs
+tools/validation/**/*.pyc
+tools/validation/results*/
+tools/validation/debug/
+tools/validation/reports/
