@@ -1,0 +1,168 @@
+SignalWeaver Evaluation and Commercial License
+
+Copyright (c) 2025-2026 SignalWeaver Studio. All rights reserved.
+
+---
+
+1. DEFINITIONS
+
+"Software" means all source code, documentation, and associated files
+contained in this repository, including the deterministic governance
+engine, policy evaluation logic, trace and replay architecture, and
+drift detection mechanisms.
+
+"Licensor" means SignalWeaver Studio, the owner of the Software.
+
+"Licensee" means any person or entity that accesses, clones, downloads,
+or otherwise obtains the Software.
+
+"Commercial Use" means any use of the Software that involves:
+  (a) redistribution of the Software in binary, containerised, or
+      source form to third parties;
+  (b) embedding or integrating the Software into a commercial product
+      or service offered to third parties;
+  (c) offering the Software as part of a paid SaaS platform or
+      managed service;
+  (d) white-label or OEM integration; or
+  (e) any use in a production environment that supports revenue-generating
+      business operations.
+
+"Evaluation Use" means use of the Software solely for the purposes of:
+  (a) local cloning and execution for technical evaluation;
+  (b) testing functionality and behaviour;
+  (c) building internal proofs of concept that are not deployed in
+      production; and
+  (d) reviewing architecture for due diligence or procurement decisions.
+
+---
+
+2. GRANT OF LICENSE — EVALUATION USE
+
+Subject to the terms of this License, the Licensor grants the Licensee
+a non-exclusive, non-transferable, revocable right to:
+
+  (a) access, read, and study the source code;
+  (b) run the Software locally for Evaluation Use;
+  (c) build and execute test suites; and
+  (d) create internal proofs of concept derived from the Software,
+      provided such proofs of concept are not deployed in any production
+      environment or offered to third parties.
+
+This grant is limited to Evaluation Use. Any Commercial Use requires a
+separate Commercial License Agreement with the Licensor.
+
+---
+
+3. COMMERCIAL USE
+
+Commercial Use of the Software is not permitted under this License.
+To obtain rights for Commercial Use, the Licensee must enter into a
+separate Commercial License Agreement with the Licensor.
+
+For OEM licensing, integration support, or enterprise deployment
+inquiries, contact: licensing@signalweaver.io
+
+---
+
+4. INTELLECTUAL PROPERTY
+
+All right, title, and interest in and to the Software, including but
+not limited to all copyrights, patents, trade secrets, trademarks, and
+other intellectual property rights, shall remain the sole and exclusive
+property of the Licensor.
+
+The Licensee acquires no ownership interest in the Software under this
+License. No implied licenses or rights are granted beyond those
+expressly stated herein.
+
+Specifically, the following remain the exclusive intellectual property
+of the Licensor:
+  (a) all deterministic logic and evaluation algorithms;
+  (b) replay guarantee mechanisms;
+  (c) trace architecture and serialisation formats;
+  (d) drift detection mechanisms; and
+  (e) the SW-CER canonical serialisation format.
+
+---
+
+5. RESTRICTIONS
+
+The Licensee shall not:
+  (a) use the Software for any Commercial Use without a Commercial
+      License Agreement;
+  (b) remove, alter, or obscure any copyright, trademark, or other
+      proprietary notices on the Software;
+  (c) reverse compile, disassemble, or otherwise attempt to derive
+      the source code of any compiled or obfuscated portions of the
+      Software, except to the extent that this restriction is
+      expressly prohibited by applicable law;
+  (d) sublicense, rent, lease, lend, or otherwise transfer the
+      Software to any third party; or
+  (e) use the Software in any manner that violates applicable law
+      or regulation.
+
+---
+
+6. DISCLAIMER OF WARRANTIES
+
+THE SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
+IN NO EVENT SHALL THE LICENSOR BE LIABLE FOR ANY CLAIM, DAMAGES, OR
+OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE,
+ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+OTHER DEALINGS IN THE SOFTWARE.
+
+The Software is currently in active development and is not yet formally
+production hardened. The Licensor makes no representation that the
+Software is suitable for any particular purpose, including but not
+limited to compliance with the EU AI Act or any other regulatory
+framework.
+
+---
+
+7. LIMITATION OF LIABILITY
+
+IN NO EVENT SHALL THE LICENSOR BE LIABLE FOR ANY INDIRECT, INCIDENTAL,
+SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, OR ANY LOSS OF PROFITS,
+REVENUE, DATA, OR DATA USE, ARISING OUT OF OR RELATED TO THIS LICENSE
+OR THE SOFTWARE, REGARDLESS OF THE FORM OF ACTION, WHETHER IN CONTRACT,
+TORT, OR OTHERWISE, EVEN IF THE LICENSOR HAS BEEN ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGES.
+
+---
+
+8. TERM AND TERMINATION
+
+This License is effective until terminated. The Licensor may terminate
+this License at any time if the Licensee breaches any term herein.
+
+Upon termination, the Licensee shall immediately cease all use of the
+Software and destroy all copies in their possession.
+
+Sections 3, 4, 5, 6, 7, and 8 shall survive termination.
+
+---
+
+9. GOVERNING LAW
+
+This License shall be governed by and construed in accordance with the
+laws of England and Wales, without regard to its conflict of law
+provisions.
+
+---
+
+10. AMENDMENTS
+
+This License may only be amended by a written instrument signed by the
+Licensor. The terms of any Commercial License Agreement shall take
+precedence over the terms of this License with respect to the licensed
+Commercial Use.
+
+---
+
+For commercial licensing inquiries:
+  Email: licensing@signalweaver.io
+
+For general inquiries:
+  Email: signalweaver.studio@gmail.com
