@@ -1,0 +1,9 @@
+VERSION = '0.3'
+CHUNK_SIZE = 100_000
+PERCENTILE_SAMPLE_SIZE = 200_000
+PLOT_MAX_POINTS = 50_000
+RANDOM_SEED = 42
+IDLE_THRESHOLD = 0.95
+MIN_IDLE_EPISODE_SECONDS = 1.0
+EXPECTED_COLUMNS = ['elapsed_s','activity','irregularity','tempo','idle','q','p','s','energy','stiffness','damping','force']
+PLOT_COLUMNS = ['activity','idle','q','p','s','energy']

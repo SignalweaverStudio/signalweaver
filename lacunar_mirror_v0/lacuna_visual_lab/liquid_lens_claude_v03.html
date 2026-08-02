@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LACUNA — Liquid Lens — sandbox v0.3</title>
+<style>
+  html,body{margin:0;height:100%;background:#000;overflow:hidden}
+  canvas{display:block;width:100vw;height:100vh}
+  #hud{position:fixed;left:16px;bottom:14px;
+       font:11px/1.6 Consolas,"Courier New",monospace;
+       color:#5d636b;letter-spacing:.09em;white-space:pre;
+       display:none;pointer-events:none;user-select:none}
+  #err{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+       font:13px Consolas,monospace;color:#8a9099;text-align:center;padding:2rem}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud"></div>
+<script>
+/* =====================================================================
+   LACUNA — LIQUID LENS — disposable renderer sandbox
+   Synthetic field values only. No engine connection.
+   Keys: 1 idle  2 typing  3 mouse stroke  4 fragmented  5 recovery
+         A auto-cycle      H state readout (off by default)
+   ===================================================================== */
+
+// ---- TUNING BLOCK -----------------------------------------------------
+const RENDER_SCALE   = 1.0;   // 0.6..1.5 — internal resolution multiplier
+const DPR_CAP        = 1.5;   // cap device pixel ratio
+const ZOOM           = 1.34;  // field units at half screen height
+const AUTO_DWELL     = 11.0;  // seconds per state in auto-cycle
+const NORMAL_SCALE   = 1.00;  // surface normal strength
+const ROUGHNESS      = 0.095; // base specular roughness (crispness)
+const TILT_GAIN      = 1.00;  // asymmetric pooling — 0 restores a centred highlight
+const FOLD_GAIN      = 1.00;  // open lateral fold relief
+const WAVE_GAIN      = 1.00;  // standing deformation relief
+const MOTION_RATE    = 1.00;  // global temporal scale — drop to 0.6 if still restless
+const EXTINCTION     = 4.60;  // absorption per unit optical depth — the silhouette control
+const SHEET_GAIN     = 1.00;  // sapphire top-sheet reflection over the whole aperture
+const REFRACT_GAIN   = 0.00;  // held back — lensing of the cavity floor through the body
+// -----------------------------------------------------------------------
+
+const VS = `#version 300 es
+in vec2 aPos;
+void main(){ gl_Position = vec4(aPos, 0.0, 1.0); }`;
+
+const FS = `#version 300 es
+precision highp float;
+out vec4 fragColor;
+
+uniform vec2  uRes;
+uniform float uTime;
+uniform float uPx;        // field units per pixel
+uniform float uZoom;
+
+// smoothed synthetic field values
+uniform float uQ, uP, uAct, uTempo, uIrr, uIdle;
+
+// derived body descriptors
+uniform vec2  uFlow;      // unit flow direction
+uniform vec2  uCenter;
+uniform float uLen;       // spine half-length
+uniform float uRad;       // base radius
+uniform float uBend;      // S-fold lateral amplitude
+uniform float uThick;     // meniscus falloff distance
+uniform float uHeight;    // surface height scale
+uniform float uFrag;      // companion-mass envelope 0..1
+uniform float uPhase;     // slow structural phase
+uniform float uNorm;      // normal strength
+uniform float uRough;
+uniform float uTilt, uFoldG, uWaveG;
+uniform float uSigma, uSheet, uRefr;
+
+#define PI 3.14159265359
+
+float dot2(vec2 v){ return dot(v,v); }
+
+// iq — 2D round cone (tapered capsule), exact
+float sdRoundCone(vec2 p, vec2 a, vec2 b, float r1, float r2){
+  vec2 ba = b - a;
+  float l2 = dot(ba,ba);
+  if(l2 < 1e-9) return length(p-a) - max(r1,r2);
+  float rr = r1 - r2;
+  float a2 = l2 - rr*rr;
+  float il2 = 1.0/l2;
+  vec2 pa = p - a;
+  float y = dot(pa,ba);
+  float z = y - l2;
+  float x2 = dot2(pa*l2 - ba*y);
+  float y2 = y*y*l2;
+  float z2 = z*z*l2;
+  float k = sign(rr)*rr*rr*x2;
+  if( sign(z)*a2*z2 > k ) return sqrt(x2 + z2)*il2 - r2;
+  if( sign(y)*a2*y2 < k ) return sqrt(x2 + y2)*il2 - r1;
+  return (sqrt(max(x2*a2*il2,0.0)) + y*rr)*il2 - r1;
+}
+
+float smin(float a, float b, float k){
+  float h = clamp(0.5 + 0.5*(b-a)/k, 0.0, 1.0);
+  return mix(b, a, h) - k*h*(1.0-h);
+}
+
+// ---- body spine: one asymmetric S-curve ------------------------------
+vec2 spinePos(float s){
+  vec2 t = uFlow;
+  vec2 n = vec2(-t.y, t.x);
+  float lat = uBend * sin(s*PI + 0.30*uIrr);
+  lat *= (1.0 + 0.50*uIrr*s);                 // asymmetric lobes
+  float along = s*uLen + 0.10*uBend*cos(s*PI*0.5 + uPhase*0.3);
+  return uCenter + t*along + n*lat;
+}
+float spineRad(float s){
+  // baseline lobe imbalance exists even at zero irregularity — never a disc
+  float asym = 0.17 + 0.30*uIrr;
+  return uRad * (1.0 - 0.38*s*s) * (1.0 + asym*sin(s*2.1 + uPhase*0.7))
+              * (1.0 + 0.10*s);
+}
+
+float bodySDF(vec2 p){
+  const int N = 8;
+  vec2  a  = spinePos(-1.0);
+  float ra = spineRad(-1.0);
+  float d  = 1e9;
+  for(int i=1;i<=N;i++){
+    float s  = -1.0 + 2.0*float(i)/float(N);
+    vec2  b  = spinePos(s);
+    float rb = spineRad(s);
+    d = min(d, sdRoundCone(p, a, b, ra, rb));
+    a = b; ra = rb;
+  }
+  if(uFrag > 0.002){
+    float o = uFrag;
+    float k = 0.20*(1.0 - 0.55*o) + 0.035;     // reluctant, heavy necking
+    float ang = uPhase*0.45 + 1.05;
+    vec2  d1 = vec2(cos(ang), sin(ang));
+    vec2  c1 = uCenter + d1*(uRad*0.95 + 0.46*o);
+    float r1 = uRad*(0.42 + 0.14*sin(uPhase*0.8));
+    d = smin(d, length(p-c1) - r1*(0.45 + 0.55*o), k);
+    // exactly one companion, ever. repeated rounded masses are the failure mode.
+  }
+  return d;
+}
+
+// ---- height field ----------------------------------------------------
+float heightAt(vec2 p, out float dOut){
+  float d = bodySDF(p);
+  dOut = d;
+  float m    = clamp(-d/uThick, 0.0, 1.0);
+  // smooth swell, zero tangent at BOTH ends. no vertical rim, therefore no
+  // grazing highlight tracing the outline. crispness now comes from folds only.
+  float base = m*m*(3.0 - 2.0*m);
+  float mask = smoothstep(0.0, 0.30, m);
+
+  // local frame aligned to flow — all detail is anisotropic, never radial
+  vec2  q2 = p - uCenter;
+  vec2  T  = uFlow;
+  vec2  Nn = vec2(-T.y, T.x);
+  float u  = dot(q2, T);
+  float v  = dot(q2, Nn);
+
+  // global tilt: the mass pools to one side, so the highlight sits off-centre
+  float tilt = uTilt * (0.30 + 0.35*uQ) * (u*0.75 + v*0.35);
+
+  // OPEN folds. sheared lines running along the flow axis with finite ends.
+  // these cannot close into contours no matter what the parameters do.
+  float w1 = uRad*(0.44 + 0.24*uIrr);
+  float o1 = uRad*( 0.30 + 0.34*sin(uPhase*0.32));
+  float o2 = uRad*(-0.46 + 0.24*sin(uPhase*0.23 + 2.10));
+  float sh = 0.28 + 0.55*uIrr;
+  float r1 = exp(-pow((v - o1 - sh*u)/w1, 2.0));
+  float r2 = exp(-pow((v - o2 + sh*0.6*u)/(w1*1.55), 2.0));
+  float foldA = uFoldG * (0.0060 + 0.0300*uAct) * (1.0 - 0.60*uIdle);
+  float folds = foldA * (r1 - 0.55*r2)
+              * (0.80 + 0.30*sin(u*1.70 + uTime*0.09*(0.3 + uP)));
+
+  // standing deformation — planar waves, wavelength near body scale
+  float kk = 1.30 + 1.90*uTempo;
+  vec2  k1 = vec2( 2.30, 1.10)*kk;
+  vec2  k2 = vec2(-1.30, 2.60)*kk;
+  float w  = 0.50 + 0.80*uTempo;
+  float stand = cos(dot(p,k1) + 0.40)*cos(uTime*w)*0.62
+              + cos(dot(p,k2) - 0.90)*cos(uTime*w*0.71 + 1.30)*0.38;
+  float standA = uWaveG * (0.0015 + 0.0160*uAct) * (1.0 - 0.75*uIdle);
+
+  // permanent faint internal drift — one term, oblique, very slow
+  float drift = sin(dot(p, vec2(1.70,-2.20)) + uTime*0.075);
+
+  return uHeight*base
+       + mask*(tilt + folds + standA*stand + 0.0022*drift);
+}
+
+vec3 normalAt(vec2 p, float e, out float d, out vec2 gradD, out float hOut){
+  float d0, dx1, dx0, dy1, dy0;
+  hOut = heightAt(p, d0);
+  float hx1 = heightAt(p + vec2(e,0.0), dx1);
+  float hx0 = heightAt(p - vec2(e,0.0), dx0);
+  float hy1 = heightAt(p + vec2(0.0,e), dy1);
+  float hy0 = heightAt(p - vec2(0.0,e), dy0);
+  d = d0;
+  gradD = vec2(dx1-dx0, dy1-dy0)/(2.0*e);
+  vec2 g = vec2(hx1-hx0, hy1-hy0)/(2.0*e);
+  float gl = length(g);
+  if(gl > 6.0) g *= 6.0/gl;                       // tame the rim singularity
+  return normalize(vec3(-g*uNorm, 1.0));
+}
+
+// ---- environment: small dark studio ----------------------------------
+float lobe(vec3 r, vec3 d, float w){
+  float x = (1.0 - dot(r,d))/max(w, 1e-3);
+  return exp(-x*x);
+}
+const vec3 K1 = vec3(-0.3244, 0.5947, 0.7357);   // key softbox, upper-left
+const vec3 K2 = vec3( 0.8412, 0.2473, 0.4452);   // cool fill, right
+const vec3 K3 = vec3( 0.1961,-0.7353, 0.6486);   // warm brass bounce, low
+
+vec3 envSample(vec3 r, float rough){
+  float w = 0.050 + rough*0.95;
+  vec3 c = vec3(0.0040, 0.0046, 0.0062);
+  c += vec3(1.00, 0.985, 0.960) * lobe(r, K1, w        ) * 1.30;
+  c += vec3(0.52, 0.590, 0.740) * lobe(r, K2, w*2.60   ) * 0.26;
+  c += vec3(0.86, 0.540, 0.250) * lobe(r, K3, w*2.10   ) * 0.20;
+  c += vec3(0.020,0.024, 0.034) * smoothstep(-0.25, 0.95, r.y);
+  return c;
+}
+
+// ---- the cavity ------------------------------------------------------
+vec3 domeNormal(vec2 p){
+  float rn = length(p);
+  float slope = 0.90*rn*rn;
+  return normalize(vec3(-(p/max(rn,1e-4))*slope, 1.0));
+}
+
+vec3 cavity(vec2 p){
+  float rn = length(p);
+  vec3  V  = vec3(0.0, 0.0, 1.0);
+  vec3  Nc = domeNormal(p);
+  float ndv = clamp(dot(Nc,V), 0.0, 1.0);
+  float fres = 0.030 + 0.970*pow(1.0-ndv, 5.0);
+  vec3  R = reflect(-V, Nc);
+
+  vec3 col = mix(vec3(0.0030,0.0036,0.0052),
+                 vec3(0.0090,0.0100,0.0128),
+                 smoothstep(0.15, 1.05, length(p - vec2(0.07,-0.05))));
+  col += envSample(R, 0.30) * fres * 0.50;
+
+  // anti-reflective edge coating — an ARC, not a ring. weighted to the key light
+  // so it never reads as a symmetric surround.
+  float edge  = smoothstep(0.80, 0.985, rn) * (1.0 - smoothstep(0.985, 1.045, rn));
+  float arc   = 0.22 + 0.78*smoothstep(-0.85, 0.85,
+                  dot(p/max(rn,1e-4), vec2(-0.55, 0.835)));
+  float ph    = rn*24.0;
+  vec3  ar    = mix(vec3(0.34,0.13,0.52), vec3(0.13,0.48,0.33), 0.5 + 0.5*sin(ph));
+  col += ar * edge * 0.15 * fres * arc;
+
+  // beyond the aperture: fall away, one whisper of warm metal
+  col *= 1.0 - smoothstep(1.00, 1.09, rn)*0.88;
+  col += vec3(0.050,0.034,0.019)
+       * smoothstep(1.010,1.038,rn) * (1.0 - smoothstep(1.038,1.10,rn))
+       * (0.30 + 0.70*arc);
+  return col;
+}
+
+// ---- fluid shading ---------------------------------------------------
+// the medium is a DIELECTRIC, index-matched to the sapphire. darkness comes from
+// absorption over path length, not from reflectivity. a conductor cannot be
+// ambiguous about where it ends.
+vec3 shadeFluid(vec3 N, vec3 V){
+  vec3  F0  = vec3(0.060, 0.061, 0.063);
+  float ndv = clamp(dot(N,V), 0.0, 1.0);
+  vec3  F   = F0 + (1.0-F0)*pow(1.0-ndv, 5.0);
+  vec3  R   = reflect(-V, N);
+
+  vec3 col = envSample(R, uRough) * F;
+
+  // one crisp analytic glint from the key light
+  vec3  H   = normalize(K1 + V);
+  float ndh = max(dot(N,H), 0.0);
+  float a   = uRough*uRough;
+  float den = ndh*ndh*(a*a - 1.0) + 1.0;
+  float D   = min((a*a)/(PI*den*den), 420.0);
+  col += vec3(1.0,0.98,0.95) * D * 0.055 * F;
+
+  return col;
+}
+
+vec3 aces(vec3 x){
+  return clamp((x*(2.51*x + 0.03))/(x*(2.43*x + 0.59) + 0.14), 0.0, 1.0);
+}
+float hash12(vec2 p){
+  vec3 p3 = fract(vec3(p.xyx)*0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y)*p3.z);
+}
+
+void main(){
+  vec2 p = (gl_FragCoord.xy - 0.5*uRes)/(0.5*uRes.y) * uZoom;
+
+  float d, h; vec2 gd;
+  vec3 N = normalAt(p, uPx, d, gd, h);
+  vec3 V = normalize(vec3(-p*0.17, 1.0));
+
+  // optical depth: half linear ramp from the boundary, half surface height, so
+  // folds thicken the medium and darken it as well as catching light.
+  float m    = clamp(-d/uThick, 0.0, 1.0);
+  float mOpt = clamp(0.5*m + 0.5*max(h,0.0)/max(uHeight,1e-4), 0.0, 1.6);
+  float T    = exp(-uSigma*mOpt);        // transmittance — continuous at the boundary
+  float pres = 1.0 - exp(-3.0*m);        // interface presence, no step anywhere
+
+  // cavity seen THROUGH the medium. no contact shadow: a drop shadow is the
+  // strongest object-sitting-in-a-bowl cue there is.
+  vec2  g   = gd/max(length(gd), 1e-4);
+  float halo= exp(-max(d,0.0)/0.050);
+  vec2  pc  = p + g*0.040*halo + N.xy*uRefr*pres;
+  vec3  col = cavity(pc) * T;
+
+  // surface reflection of the medium, faded in with the interface
+  col += shadeFluid(N, V) * pres;
+
+  // sapphire top sheet over the whole aperture — a second reflection from
+  // different geometry, so no highlight can be attributed to one layer.
+  vec3  Nd  = domeNormal(p);
+  float nds = clamp(dot(Nd, V), 0.0, 1.0);
+  float Fs  = 0.040 + 0.960*pow(1.0-nds, 5.0);
+  float ap  = 1.0 - smoothstep(0.985, 1.030, length(p));
+  col += envSample(reflect(-V, Nd), 0.035) * Fs * uSheet * ap;
+
+  col *= 1.0 - 0.30*smoothstep(0.55, 1.55, length(p));   // gentle vignette
+  col  = pow(aces(col), vec3(1.0/2.2));
+  col += (hash12(gl_FragCoord.xy + fract(uTime)*137.0) - 0.5)/255.0;
+  fragColor = vec4(col, 1.0);
+}`;
+
+// =======================================================================
+// synthetic field states
+// =======================================================================
+const STATES = {
+  idle:       { q:0.05, p:0.02, act:0.03, tempo:0.14, irr:0.06, idle:1.00, label:'IDLE' },
+  typing:     { q:0.26, p:0.10, act:0.36, tempo:0.72, irr:0.16, idle:0.14, label:'TYPING' },
+  stroke:     { q:0.46, p:0.88, act:0.58, tempo:0.32, irr:0.30, idle:0.04, label:'MOUSE STROKE' },
+  fragmented: { q:0.54, p:0.42, act:0.76, tempo:0.54, irr:0.92, idle:0.02, label:'FRAGMENTED' },
+  recovery:   { q:0.18, p:0.14, act:0.14, tempo:0.24, irr:0.24, idle:0.78, label:'RECOVERY' }
+};
+const ORDER = ['idle','typing','stroke','fragmented','recovery'];
+
+// critically-damped-ish smoothing, per-parameter time constants (seconds)
+const TAU = { q:1.30, p:0.70, act:0.90, tempo:1.60, irr:1.90, idle:2.40 };
+
+const S = { q:0.05, p:0.02, act:0.03, tempo:0.14, irr:0.06, idle:1.00 };
+let target   = STATES.idle;
+let stateKey = 'idle';
+let auto = false, autoT = 0, autoIdx = 0;
+
+// slow structural variables
+let ang = 0.7, phase = 0.0, frag = 0.0, cx = 0.0, cy = 0.0;
+
+// =======================================================================
+const canvas = document.getElementById('c');
+const hud    = document.getElementById('hud');
+const gl = canvas.getContext('webgl2', {antialias:false, alpha:false,
+                                        powerPreference:'high-performance'});
+if(!gl){
+  document.body.innerHTML =
+    '<div id="err">WebGL2 unavailable.<br>Open in Chrome or Edge with hardware acceleration enabled.</div>';
+  throw new Error('no webgl2');
+}
+
+function compile(type, src){
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src); gl.compileShader(s);
+  if(!gl.getShaderParameter(s, gl.COMPILE_STATUS)){
+    document.body.innerHTML = '<div id="err">Shader error:<br><pre>' +
+      gl.getShaderInfoLog(s) + '</pre></div>';
+    throw new Error(gl.getShaderInfoLog(s));
+  }
+  return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, compile(gl.VERTEX_SHADER, VS));
+gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, FS));
+gl.bindAttribLocation(prog, 0, 'aPos');
+gl.linkProgram(prog);
+gl.useProgram(prog);
+
+const vao = gl.createVertexArray();
+gl.bindVertexArray(vao);
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0);
+gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+const U = {};
+for(const n of ['uRes','uTime','uPx','uZoom','uQ','uP','uAct','uTempo','uIrr','uIdle',
+                'uFlow','uCenter','uLen','uRad','uBend','uThick','uHeight','uFrag',
+                'uPhase','uNorm','uRough','uTilt','uFoldG','uWaveG',
+                'uSigma','uSheet','uRefr'])
+  U[n] = gl.getUniformLocation(prog, n);
+
+function resize(){
+  const dpr = Math.min(window.devicePixelRatio || 1, DPR_CAP) * RENDER_SCALE;
+  const w = Math.max(2, Math.round(innerWidth  * dpr));
+  const h = Math.max(2, Math.round(innerHeight * dpr));
+  if(canvas.width !== w || canvas.height !== h){
+    canvas.width = w; canvas.height = h;
+    gl.viewport(0, 0, w, h);
+  }
+}
+addEventListener('resize', resize);
+resize();
+
+addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if(k >= '1' && k <= '5'){ auto = false; stateKey = ORDER[+k - 1]; target = STATES[stateKey]; }
+  else if(k === 'a'){ auto = !auto; autoT = 0; }
+  else if(k === 'h'){ hud.style.display = (hud.style.display === 'block') ? 'none' : 'block'; }
+});
+
+let last = performance.now()*0.001, t = 0;
+
+function frame(now){
+  now *= 0.001;
+  let dt = Math.min(now - last, 0.05) * MOTION_RATE; last = now; t += dt;
+
+  if(auto){
+    autoT += dt;
+    if(autoT > AUTO_DWELL){
+      autoT = 0; autoIdx = (autoIdx + 1) % ORDER.length;
+      stateKey = ORDER[autoIdx]; target = STATES[stateKey];
+    }
+  }
+
+  // exponential smoothing toward the state targets
+  for(const k of ['q','p','act','tempo','irr','idle']){
+    const a = 1.0 - Math.exp(-dt / TAU[k]);
+    S[k] += (target[k] - S[k]) * a;
+  }
+
+  // separation envelope: slow to form, slower to release
+  const fragTarget = Math.max(0, S.irr*S.act - 0.18) / 0.82;
+  const rate = fragTarget > frag ? 0.26 : 0.11;
+  frag += Math.sign(fragTarget - frag) * Math.min(Math.abs(fragTarget - frag), rate*dt);
+  frag = Math.min(Math.max(frag, 0), 1);
+
+  // flow direction rotates slowly; momentum accelerates the drift
+  ang   += dt * (0.050 + 0.22*S.p) * (1.0 + 0.25*Math.sin(t*0.11));
+  phase += dt * (0.14 + 0.36*S.tempo);
+
+  const wander = 0.018 + 0.048*S.p;
+  cx = Math.sin(t*0.11)*wander + Math.cos(ang)*0.055*S.q;
+  cy = Math.cos(t*0.083)*wander + Math.sin(ang)*0.055*S.q;
+
+  const rad    = 0.300 + 0.045*S.q - 0.070*frag;
+  const len    = 0.135 + 0.380*S.p + 0.085*S.act;   // never round, even at idle
+  const bend   = 0.048 + 0.260*S.p*(0.55 + 0.45*S.irr) + 0.045*S.irr;
+  const thick  = 0.155 + 0.045*S.q;
+  const height = 0.082 + 0.030*S.q;
+
+  gl.uniform2f(U.uRes, canvas.width, canvas.height);
+  gl.uniform1f(U.uTime, t);
+  gl.uniform1f(U.uPx, ZOOM/(0.5*canvas.height));
+  gl.uniform1f(U.uZoom, ZOOM);
+  gl.uniform1f(U.uQ, S.q);
+  gl.uniform1f(U.uP, S.p);
+  gl.uniform1f(U.uAct, S.act);
+  gl.uniform1f(U.uTempo, S.tempo);
+  gl.uniform1f(U.uIrr, S.irr);
+  gl.uniform1f(U.uIdle, S.idle);
+  gl.uniform2f(U.uFlow, Math.cos(ang), Math.sin(ang));
+  gl.uniform2f(U.uCenter, cx, cy);
+  gl.uniform1f(U.uLen, len);
+  gl.uniform1f(U.uRad, rad);
+  gl.uniform1f(U.uBend, bend);
+  gl.uniform1f(U.uThick, thick);
+  gl.uniform1f(U.uHeight, height);
+  gl.uniform1f(U.uFrag, frag);
+  gl.uniform1f(U.uPhase, phase);
+  gl.uniform1f(U.uNorm, NORMAL_SCALE);
+  gl.uniform1f(U.uRough, ROUGHNESS + 0.055*S.irr);
+  gl.uniform1f(U.uTilt,  TILT_GAIN);
+  gl.uniform1f(U.uFoldG, FOLD_GAIN);
+  gl.uniform1f(U.uWaveG, WAVE_GAIN);
+  gl.uniform1f(U.uSigma, EXTINCTION);
+  gl.uniform1f(U.uSheet, SHEET_GAIN);
+  gl.uniform1f(U.uRefr,  REFRACT_GAIN);
+
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  if(hud.style.display === 'block'){
+    const f = v => v.toFixed(2);
+    hud.textContent =
+      STATES[stateKey].label + (auto ? '   [auto]' : '') + '\n' +
+      'q ' + f(S.q) + '   p ' + f(S.p) + '   act ' + f(S.act) + '\n' +
+      'tempo ' + f(S.tempo) + '   irr ' + f(S.irr) + '   idle ' + f(S.idle) + '\n' +
+      'sep ' + f(frag);
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

@@ -1,0 +1,68 @@
+====================================================================
+LACUNAR OBSERVATORY v1.0
+====================================================================
+
+Recordings compared: 5
+Total rows: 13,217,874
+Total duration: 30h 35m 48.93s
+
+RECORDINGS
+--------------------------------------------------------------------
+002
+  File: experiment_002_all_day.csv
+  Rows: 3,030,927
+  Duration: 7h 00m 57.72s
+  Sample rate: 120.00 Hz
+  Idle fraction: 83.88%
+  Longest idle episode: 2h 08m 12.45s
+
+003
+  File: experiment_003_all_day.csv
+  Rows: 1,971,333
+  Duration: 4h 33m 47.77s
+  Sample rate: 120.00 Hz
+  Idle fraction: 60.08%
+  Longest idle episode: 1h 57m 45.40s
+
+004
+  File: experiment_004_all_day.csv
+  Rows: 3,707,109
+  Duration: 8h 34m 52.57s
+  Sample rate: 120.00 Hz
+  Idle fraction: 85.49%
+  Longest idle episode: 2h 49m 01.57s
+
+005
+  File: experiment_005_all_day.csv
+  Rows: 3,655,487
+  Duration: 8h 27m 42.38s
+  Sample rate: 120.00 Hz
+  Idle fraction: 50.75%
+  Longest idle episode: 1h 28m 54.48s
+
+006
+  File: experiment_006_all_day.csv
+  Rows: 853,018
+  Duration: 1h 58m 28.48s
+  Sample rate: 120.00 Hz
+  Idle fraction: 42.88%
+  Longest idle episode: 0h 12m 04.02s
+
+COMPARATIVE HIGHLIGHTS
+--------------------------------------------------------------------
+Highest mean activity: 005
+Lowest mean activity: 002
+Highest activity variability: 005
+Lowest mean irregularity: 004
+Highest mean irregularity: 006
+Lowest idle fraction: 006
+Highest idle fraction: 004
+Largest q spread: 005
+Largest p spread: 006
+
+INTERPRETATION CAUTION
+--------------------------------------------------------------------
+These comparisons describe recorded input dynamics, not cognitive states.
+Differences may reflect recording length, task mix, AFK time, hardware
+behaviour, engine configuration, or calibration changes. The phase atlas
+uses identical axes and the profiles are normalised by recording duration.

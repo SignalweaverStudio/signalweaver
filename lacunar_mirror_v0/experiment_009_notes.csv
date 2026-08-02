@@ -1,0 +1,9 @@
+event,timestamp,detail
+recording_start,2026-08-01T09:17:53.365+01:00,experiment_009_all_day.csv
+engine_epoch,2026-08-01T09:17:53.366+01:00,B2
+note,2026-08-01T10:27:24.796+01:00,Coffee break
+note,2026-08-01T11:02:35.818+01:00,Returned
+note,2026-08-01T12:31:26.353+01:00,Away for lunch
+note,2026-08-01T16:33:07.434+01:00,Returned from lunch
+note,2026-08-01T17:17:01.921+01:00,"End of Day 9. Explored Liquid Lens renderer with Claude. Rejected speaker-cone, membrane and pool-ball architectures. Concluded the desktop renderer is the first implementation of a future physical Lacuna instrument, not a simulation of one. Future work: continue renderer experiments and refine the instrument's optical design."
+recording_stop,2026-08-01T17:17:11.889+01:00,experiment_009_all_day.csv

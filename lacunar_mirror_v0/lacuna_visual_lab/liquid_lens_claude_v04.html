@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LACUNA — Liquid Lens — sandbox v0.4 — density field</title>
+<style>
+  html,body{margin:0;height:100%;background:#000;overflow:hidden}
+  canvas{display:block;width:100vw;height:100vh}
+  #hud{position:fixed;left:16px;bottom:14px;
+       font:11px/1.6 Consolas,"Courier New",monospace;
+       color:#5d636b;letter-spacing:.09em;white-space:pre;
+       display:none;pointer-events:none;user-select:none}
+  #err{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+       font:13px Consolas,monospace;color:#8a9099;text-align:center;padding:2rem}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud"></div>
+<script>
+/* =====================================================================
+   LACUNA — LIQUID LENS v0.4 — CONTINUOUS OPTICAL DENSITY FIELD
+
+   No body. No silhouette. No signed distance function. Nothing centred.
+   Darkness is absorption through a density field carried by the flow.
+   Structure is the GRADIENT of that field, rendered as schlieren.
+
+   Keys: 1 idle  2 typing  3 mouse stroke  4 fragmented  5 recovery
+         A auto-cycle      H state readout (off by default)
+   ===================================================================== */
+
+// ---- TUNING BLOCK -----------------------------------------------------
+const RENDER_SCALE    = 1.0;   // internal resolution multiplier
+const DPR_CAP         = 1.5;
+const ZOOM            = 1.34;
+const AUTO_DWELL      = 11.0;
+const MOTION_RATE     = 1.00;  // global temporal scale
+
+const DENSITY_GAIN    = 1.00;  // how much optical disturbance exists at all
+const EXTINCTION      = 2.30;  // absorption per unit density
+const ANISOTROPY      = 3.60;  // flow-axis stretch. 1.0 = isotropic = FOG.
+const SCHLIEREN_GAIN  = 1.00;  // gradient-derived structure
+const GRADIENT_SCALE  = 0.085; // gradient -> pseudo-normal tilt
+const REFRACT_GAIN    = 0.055; // lensing of the cavity through the field
+const SHEET_GAIN      = 1.00;  // sapphire top sheet
+const ROUGHNESS       = 0.085;
+// -----------------------------------------------------------------------
+
+const VS = `#version 300 es
+in vec2 aPos;
+void main(){ gl_Position = vec4(aPos, 0.0, 1.0); }`;
+
+const FS = `#version 300 es
+precision highp float;
+out vec4 fragColor;
+
+uniform vec2  uRes;
+uniform float uTime, uPx, uZoom;
+uniform float uQ, uP, uAct, uTempo, uIrr, uIdle;
+uniform vec2  uFlow;
+uniform float uPhase;
+uniform float uDens, uSigma, uAniso, uSchl, uGradS, uRefr, uSheet, uRough;
+
+#define PI 3.14159265359
+
+// ---- noise -----------------------------------------------------------
+float hash21(vec2 p){
+  vec3 p3 = fract(vec3(p.xyx)*0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y)*p3.z);
+}
+float vnoise(vec2 p){
+  vec2 i = floor(p), f = fract(p);
+  f = f*f*(3.0 - 2.0*f);
+  float a = hash21(i);
+  float b = hash21(i + vec2(1.0,0.0));
+  float c = hash21(i + vec2(0.0,1.0));
+  float d = hash21(i + vec2(1.0,1.0));
+  return mix(mix(a,b,f.x), mix(c,d,f.x), f.y);
+}
+float fbm(vec2 p){
+  float s = 0.0, a = 0.5;
+  for(int i=0;i<3;i++){ s += a*vnoise(p); p = p*2.03 + vec2(1.7,9.2); a *= 0.5; }
+  return s/0.875;
+}
+
+// ---- field coordinates ----------------------------------------------
+// anisotropic, advected, sheared. no term here depends on distance to
+// the origin, so the field cannot acquire a centre.
+vec2 fieldCoord(vec2 p){
+  vec2 T = uFlow;
+  vec2 N = vec2(-T.y, T.x);
+  vec2 c = vec2(dot(p,T)/uAniso, dot(p,N));
+  c.x -= uTime*(0.030 + 0.300*uP);            // transport along the flow
+  c.y += 0.10*sin(uTime*0.061) + 0.05*uPhase; // slow lateral wander
+  float w = 0.22 + 0.95*uIrr;                 // shear warp breaks coherence
+  c += w*0.35*vec2(sin(c.y*2.10 + uPhase*0.55),
+                   cos(c.x*1.70 - uPhase*0.47));
+  return c;
+}
+
+// ---- optical density -------------------------------------------------
+float density(vec2 p){
+  vec2  c = fieldCoord(p);
+
+  // where density exists at all — patchy, drifting, never uniform
+  float E = fbm(c*1.15 + vec2(0.0, uTime*0.020));
+  E = smoothstep(0.40, 0.92, E);
+
+  // laminae: thin absorbing sheets with wide clear gaps between them.
+  // the sharpening exponent is what separates striae from haze.
+  float k     = 6.0 + 20.0*uTempo;
+  float s     = 0.5 + 0.5*sin(c.y*k + c.x*2.30 + uTime*0.20);
+  float sharp = 1.6 + 3.4*uTempo;
+  float L     = pow(s, sharp)*(1.0 - 0.75*uIdle) + 0.22;
+
+  float amp = uDens*(0.08 + 1.70*uAct)*(1.0 - 0.72*uIdle);
+  float rho = amp*E*L;
+
+  // q: one broad off-axis density bias. a long gradient, not a blob.
+  rho += uQ*0.50*E*clamp(dot(p, vec2(-0.55,0.84)) + 0.55, 0.0, 1.0);
+
+  // aperture clip only — the single permitted radial term
+  rho *= 1.0 - smoothstep(0.84, 1.00, length(p));
+  return rho;
+}
+
+// ---- environment -----------------------------------------------------
+float lobe(vec3 r, vec3 d, float w){
+  float x = (1.0 - dot(r,d))/max(w, 1e-3);
+  return exp(-x*x);
+}
+const vec3 K1 = vec3(-0.3244, 0.5947, 0.7357);
+const vec3 K2 = vec3( 0.8412, 0.2473, 0.4452);
+const vec3 K3 = vec3( 0.1961,-0.7353, 0.6486);
+
+vec3 envSample(vec3 r, float rough){
+  float w = 0.050 + rough*0.95;
+  vec3 c = vec3(0.0040, 0.0046, 0.0062);
+  c += vec3(1.00, 0.985, 0.960) * lobe(r, K1, w      ) * 1.30;
+  c += vec3(0.52, 0.590, 0.740) * lobe(r, K2, w*2.60 ) * 0.26;
+  c += vec3(0.86, 0.540, 0.250) * lobe(r, K3, w*2.10 ) * 0.20;
+  c += vec3(0.020,0.024, 0.034) * smoothstep(-0.25, 0.95, r.y);
+  return c;
+}
+
+vec3 domeNormal(vec2 p){
+  float rn = length(p);
+  return normalize(vec3(-(p/max(rn,1e-4))*(0.90*rn*rn), 1.0));
+}
+
+// ---- cavity ----------------------------------------------------------
+vec3 cavity(vec2 p){
+  float rn = length(p);
+  vec3  V  = vec3(0.0,0.0,1.0);
+  vec3  Nc = domeNormal(p);
+  float ndv = clamp(dot(Nc,V), 0.0, 1.0);
+  float fres = 0.030 + 0.970*pow(1.0-ndv, 5.0);
+
+  vec3 col = mix(vec3(0.0030,0.0036,0.0052),
+                 vec3(0.0090,0.0100,0.0128),
+                 smoothstep(0.15, 1.05, length(p - vec2(0.07,-0.05))));
+  col += envSample(reflect(-V,Nc), 0.30)*fres*0.50;
+
+  float edge = smoothstep(0.80, 0.985, rn)*(1.0 - smoothstep(0.985, 1.045, rn));
+  float arc  = 0.22 + 0.78*smoothstep(-0.85, 0.85,
+                 dot(p/max(rn,1e-4), vec2(-0.55, 0.835)));
+  float ph   = rn*24.0;
+  vec3  ar   = mix(vec3(0.34,0.13,0.52), vec3(0.13,0.48,0.33), 0.5 + 0.5*sin(ph));
+  col += ar*edge*0.15*fres*arc;
+
+  col *= 1.0 - smoothstep(1.00, 1.09, rn)*0.88;
+  col += vec3(0.050,0.034,0.019)
+       * smoothstep(1.010,1.038,rn)*(1.0 - smoothstep(1.038,1.10,rn))
+       * (0.30 + 0.70*arc);
+  return col;
+}
+
+// ---- shading of a gradient, not a surface ----------------------------
+vec3 shadeGradient(vec3 N, vec3 V){
+  vec3  F0  = vec3(0.060, 0.061, 0.063);
+  float ndv = clamp(dot(N,V), 0.0, 1.0);
+  vec3  F   = F0 + (1.0-F0)*pow(1.0-ndv, 5.0);
+  vec3  col = envSample(reflect(-V,N), uRough)*F;
+
+  vec3  H   = normalize(K1 + V);
+  float ndh = max(dot(N,H), 0.0);
+  float a   = uRough*uRough;
+  float den = ndh*ndh*(a*a - 1.0) + 1.0;
+  col += vec3(1.0,0.98,0.95)*min((a*a)/(PI*den*den), 420.0)*0.055*F;
+  return col;
+}
+
+vec3 aces(vec3 x){
+  return clamp((x*(2.51*x + 0.03))/(x*(2.43*x + 0.59) + 0.14), 0.0, 1.0);
+}
+float dither(vec2 p){
+  vec3 p3 = fract(vec3(p.xyx)*0.1031);
+  p3 += dot(p3, p3.yzx + 19.19);
+  return fract((p3.x + p3.y)*p3.z);
+}
+
+void main(){
+  vec2 p = (gl_FragCoord.xy - 0.5*uRes)/(0.5*uRes.y)*uZoom;
+  vec3 V = normalize(vec3(-p*0.17, 1.0));
+
+  float e = uPx*1.4;
+  float rho = density(p);
+  vec2  grad = vec2(density(p + vec2(e,0.0)) - density(p - vec2(e,0.0)),
+                    density(p + vec2(0.0,e)) - density(p - vec2(0.0,e)))/(2.0*e);
+
+  float gl = length(grad);
+  if(gl > 90.0) grad *= 90.0/gl;
+  gl = min(gl, 90.0);
+
+  // absorption: the cavity seen through the field, lensed by its gradient
+  vec3 col = cavity(p + grad*uRefr*0.01)*exp(-uSigma*rho);
+
+  // schlieren: the gradient behaves as an interface. knife-edge asymmetry
+  // means one side of every lamina brightens and the other does not.
+  vec3  Ng    = normalize(vec3(-grad*uGradS, 1.0));
+  float inter = 1.0 - exp(-gl*0.09);
+  vec2  knife = vec2(-0.55, 0.835);
+  float side  = 0.30 + 0.70*smoothstep(-0.55, 0.65, dot(grad/max(gl,1e-4), knife));
+  col += shadeGradient(Ng, V)*inter*side*uSchl;
+
+  // sapphire top sheet — a reflection from geometry unrelated to the field
+  vec3  Nd  = domeNormal(p);
+  float nds = clamp(dot(Nd,V), 0.0, 1.0);
+  float Fs  = 0.040 + 0.960*pow(1.0-nds, 5.0);
+  float ap  = 1.0 - smoothstep(0.985, 1.030, length(p));
+  col += envSample(reflect(-V,Nd), 0.035)*Fs*uSheet*ap;
+
+  col *= 1.0 - 0.30*smoothstep(0.55, 1.55, length(p));
+  col  = pow(aces(col), vec3(1.0/2.2));
+  col += (dither(gl_FragCoord.xy + fract(uTime)*137.0) - 0.5)/255.0;
+  fragColor = vec4(col, 1.0);
+}`;
+
+// =======================================================================
+const STATES = {
+  idle:       { q:0.05, p:0.02, act:0.03, tempo:0.14, irr:0.06, idle:1.00, label:'IDLE' },
+  typing:     { q:0.26, p:0.10, act:0.36, tempo:0.72, irr:0.16, idle:0.14, label:'TYPING' },
+  stroke:     { q:0.46, p:0.88, act:0.58, tempo:0.32, irr:0.30, idle:0.04, label:'MOUSE STROKE' },
+  fragmented: { q:0.54, p:0.42, act:0.76, tempo:0.54, irr:0.92, idle:0.02, label:'FRAGMENTED' },
+  recovery:   { q:0.18, p:0.14, act:0.14, tempo:0.24, irr:0.24, idle:0.78, label:'RECOVERY' }
+};
+const ORDER = ['idle','typing','stroke','fragmented','recovery'];
+const TAU = { q:1.30, p:0.70, act:0.90, tempo:1.60, irr:1.90, idle:2.40 };
+const S = { q:0.05, p:0.02, act:0.03, tempo:0.14, irr:0.06, idle:1.00 };
+
+let target = STATES.idle, stateKey = 'idle';
+let auto = false, autoT = 0, autoIdx = 0;
+let ang = 0.7, phase = 0.0;
+
+const canvas = document.getElementById('c');
+const hud    = document.getElementById('hud');
+const gl2 = canvas.getContext('webgl2', {antialias:false, alpha:false,
+                                         powerPreference:'high-performance'});
+if(!gl2){
+  document.body.innerHTML =
+    '<div id="err">WebGL2 unavailable.<br>Open in Chrome or Edge with hardware acceleration enabled.</div>';
+  throw new Error('no webgl2');
+}
+function compile(type, src){
+  const s = gl2.createShader(type);
+  gl2.shaderSource(s, src); gl2.compileShader(s);
+  if(!gl2.getShaderParameter(s, gl2.COMPILE_STATUS)){
+    document.body.innerHTML = '<div id="err">Shader error:<br><pre>' +
+      gl2.getShaderInfoLog(s) + '</pre></div>';
+    throw new Error(gl2.getShaderInfoLog(s));
+  }
+  return s;
+}
+const prog = gl2.createProgram();
+gl2.attachShader(prog, compile(gl2.VERTEX_SHADER, VS));
+gl2.attachShader(prog, compile(gl2.FRAGMENT_SHADER, FS));
+gl2.bindAttribLocation(prog, 0, 'aPos');
+gl2.linkProgram(prog);
+gl2.useProgram(prog);
+
+const vao = gl2.createVertexArray();
+gl2.bindVertexArray(vao);
+const buf = gl2.createBuffer();
+gl2.bindBuffer(gl2.ARRAY_BUFFER, buf);
+gl2.bufferData(gl2.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl2.STATIC_DRAW);
+gl2.enableVertexAttribArray(0);
+gl2.vertexAttribPointer(0, 2, gl2.FLOAT, false, 0, 0);
+
+const U = {};
+for(const n of ['uRes','uTime','uPx','uZoom','uQ','uP','uAct','uTempo','uIrr','uIdle',
+                'uFlow','uPhase','uDens','uSigma','uAniso','uSchl','uGradS','uRefr',
+                'uSheet','uRough'])
+  U[n] = gl2.getUniformLocation(prog, n);
+
+function resize(){
+  const dpr = Math.min(window.devicePixelRatio || 1, DPR_CAP)*RENDER_SCALE;
+  const w = Math.max(2, Math.round(innerWidth*dpr));
+  const h = Math.max(2, Math.round(innerHeight*dpr));
+  if(canvas.width !== w || canvas.height !== h){
+    canvas.width = w; canvas.height = h; gl2.viewport(0,0,w,h);
+  }
+}
+addEventListener('resize', resize); resize();
+
+addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if(k >= '1' && k <= '5'){ auto = false; stateKey = ORDER[+k-1]; target = STATES[stateKey]; }
+  else if(k === 'a'){ auto = !auto; autoT = 0; }
+  else if(k === 'h'){ hud.style.display = (hud.style.display === 'block') ? 'none' : 'block'; }
+});
+
+let last = performance.now()*0.001, t = 0;
+
+function frame(now){
+  now *= 0.001;
+  let dt = Math.min(now - last, 0.05)*MOTION_RATE; last = now; t += dt;
+
+  if(auto){
+    autoT += dt;
+    if(autoT > AUTO_DWELL){
+      autoT = 0; autoIdx = (autoIdx + 1) % ORDER.length;
+      stateKey = ORDER[autoIdx]; target = STATES[stateKey];
+    }
+  }
+  for(const k of ['q','p','act','tempo','irr','idle']){
+    S[k] += (target[k] - S[k])*(1.0 - Math.exp(-dt/TAU[k]));
+  }
+  ang   += dt*(0.050 + 0.22*S.p)*(1.0 + 0.25*Math.sin(t*0.11));
+  phase += dt*(0.14 + 0.36*S.tempo);
+
+  gl2.uniform2f(U.uRes, canvas.width, canvas.height);
+  gl2.uniform1f(U.uTime, t);
+  gl2.uniform1f(U.uPx, ZOOM/(0.5*canvas.height));
+  gl2.uniform1f(U.uZoom, ZOOM);
+  gl2.uniform1f(U.uQ, S.q);
+  gl2.uniform1f(U.uP, S.p);
+  gl2.uniform1f(U.uAct, S.act);
+  gl2.uniform1f(U.uTempo, S.tempo);
+  gl2.uniform1f(U.uIrr, S.irr);
+  gl2.uniform1f(U.uIdle, S.idle);
+  gl2.uniform2f(U.uFlow, Math.cos(ang), Math.sin(ang));
+  gl2.uniform1f(U.uPhase, phase);
+  gl2.uniform1f(U.uDens, DENSITY_GAIN);
+  gl2.uniform1f(U.uSigma, EXTINCTION);
+  gl2.uniform1f(U.uAniso, ANISOTROPY);
+  gl2.uniform1f(U.uSchl, SCHLIEREN_GAIN);
+  gl2.uniform1f(U.uGradS, GRADIENT_SCALE);
+  gl2.uniform1f(U.uRefr, REFRACT_GAIN);
+  gl2.uniform1f(U.uSheet, SHEET_GAIN);
+  gl2.uniform1f(U.uRough, ROUGHNESS + 0.055*S.irr);
+
+  gl2.drawArrays(gl2.TRIANGLES, 0, 3);
+
+  if(hud.style.display === 'block'){
+    const f = v => v.toFixed(2);
+    hud.textContent = STATES[stateKey].label + (auto ? '   [auto]' : '') + '\n' +
+      'q ' + f(S.q) + '   p ' + f(S.p) + '   act ' + f(S.act) + '\n' +
+      'tempo ' + f(S.tempo) + '   irr ' + f(S.irr) + '   idle ' + f(S.idle);
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

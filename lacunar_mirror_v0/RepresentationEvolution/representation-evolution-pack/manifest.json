@@ -1,0 +1,21 @@
+{
+  "title": "Representation Evolution Inquiry",
+  "origin": "Lacunar Mirror diagnostic system v0.4",
+  "status": "Provisional research record",
+  "files": [
+    "01-origin-and-provenance.md",
+    "02-evolution-log.md",
+    "03-current-working-observations.md",
+    "04-open-questions.md",
+    "ONE-PAGE-CHECKLIST.md",
+    "QUICK-SUMMARY.md",
+    "README.md",
+    "START-HERE.md",
+    "sessions/001-lacunar-mirror-v0.4.md",
+    "sessions/002-gemini-transfer-experiment.md",
+    "sessions/session-template.md",
+    "source-material/conversation-index.md",
+    "source-material/key-phrases.md",
+    "source-material/status-labels.md"
+  ]
+}

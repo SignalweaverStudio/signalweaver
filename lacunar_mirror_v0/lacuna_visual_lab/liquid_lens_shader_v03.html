@@ -1,0 +1,833 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Lacuna Liquid Lens — Shader Sandbox v0.3</title>
+<style>
+    html, body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #050607;
+        color: #c8b9a3;
+        font-family: "Segoe UI", sans-serif;
+    }
+
+    canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+    }
+
+    #hud {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+    }
+
+    #state {
+        position: absolute;
+        top: 22px;
+        left: 24px;
+        font-size: 17px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+    }
+
+    #help {
+        position: absolute;
+        left: 24px;
+        bottom: 20px;
+        color: #766d63;
+        font-size: 13px;
+    }
+
+    #status {
+        position: absolute;
+        right: 24px;
+        top: 22px;
+        color: #81786f;
+        font-size: 13px;
+        text-align: right;
+        line-height: 1.6;
+    }
+
+    #error {
+        position: absolute;
+        left: 24px;
+        right: 24px;
+        top: 80px;
+        color: #ffb0a8;
+        white-space: pre-wrap;
+        font-family: Consolas, monospace;
+    }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+
+<div id="hud">
+    <div id="state">Idle</div>
+    <div id="status">Liquid Lens v0.3<br>synthetic field</div>
+    <div id="help">
+        1 Idle &nbsp; 2 Typing &nbsp; 3 Mouse stroke &nbsp;
+        4 Fragmented &nbsp; 5 Recovery &nbsp; A Auto &nbsp; Esc Close
+    </div>
+    <div id="error"></div>
+</div>
+
+<script>
+(() => {
+    "use strict";
+
+    const canvas = document.getElementById("gl");
+    const stateLabel = document.getElementById("state");
+    const statusLabel = document.getElementById("status");
+    const errorLabel = document.getElementById("error");
+
+    const gl = canvas.getContext("webgl", {
+        alpha: false,
+        antialias: true,
+        preserveDrawingBuffer: false
+    });
+
+    if (!gl) {
+        errorLabel.textContent =
+            "WebGL could not start in this browser or graphics configuration.";
+        return;
+    }
+
+    const vertexSource = `
+        attribute vec2 a_position;
+        varying vec2 v_uv;
+
+        void main() {
+            v_uv = a_position * 0.5 + 0.5;
+            gl_Position = vec4(a_position, 0.0, 1.0);
+        }
+    `;
+
+    const fragmentSource = `
+        precision highp float;
+
+        varying vec2 v_uv;
+
+        uniform vec2 u_resolution;
+        uniform float u_time;
+        uniform float u_mode;
+        uniform float u_transition;
+        uniform vec2 u_pointer;
+
+        const float PI = 3.141592653589793;
+
+        float saturate(float value) {
+            return clamp(value, 0.0, 1.0);
+        }
+
+        float smoothUnion(float a, float b, float softness) {
+            float h = saturate(
+                0.5 + 0.5 * (b - a) / softness
+            );
+            return mix(b, a, h) - softness * h * (1.0 - h);
+        }
+
+        mat2 rotate2D(float angle) {
+            float c = cos(angle);
+            float s = sin(angle);
+            return mat2(c, -s, s, c);
+        }
+
+        float ribbonDistance(
+            vec2 point,
+            float angle,
+            float bend,
+            float offset
+        ) {
+            vec2 p = rotate2D(angle) * point;
+
+            float centre =
+                offset
+                + bend * sin(p.x * 2.4 + u_time * 0.22)
+                + 0.055 * sin(p.x * 5.1 - u_time * 0.13);
+
+            return abs(p.y - centre);
+        }
+
+        float lensHeight(vec2 point) {
+            float mode = u_mode;
+
+            float mouseAngle =
+                -0.35
+                + 0.28 * sin(u_time * 0.24)
+                + 0.20 * u_pointer.x;
+
+            float idleDistance = ribbonDistance(
+                point,
+                -0.10,
+                0.09,
+                -0.05
+            );
+
+            float typingDistance = ribbonDistance(
+                point,
+                -0.16 + 0.05 * sin(u_time * 0.8),
+                0.12,
+                -0.03
+            );
+
+            float mouseDistance = ribbonDistance(
+                point,
+                mouseAngle,
+                0.22,
+                0.02
+            );
+
+            float recoveryAmount = exp(
+                -0.35 * mod(u_time, 18.0)
+            );
+
+            float recoveryDistance = ribbonDistance(
+                point,
+                -0.10 + recoveryAmount * 0.55,
+                0.09 + recoveryAmount * 0.17,
+                -0.05
+            );
+
+            float distanceField = idleDistance;
+            float bodyWidth = 0.18;
+
+            if (mode < 1.5) {
+                distanceField = idleDistance;
+                bodyWidth = 0.16;
+            } else if (mode < 2.5) {
+                distanceField = typingDistance;
+                bodyWidth =
+                    0.18
+                    + 0.025 * sin(point.x * 13.0 - u_time * 2.0);
+            } else if (mode < 3.5) {
+                distanceField = mouseDistance;
+                bodyWidth = 0.205;
+            } else if (mode < 4.5) {
+                float mainBody = ribbonDistance(
+                    point,
+                    0.20 * sin(u_time * 0.17),
+                    0.18,
+                    -0.04
+                );
+
+                vec2 orbitA = vec2(
+                    0.32 * cos(u_time * 0.24),
+                    0.22 * sin(u_time * 0.24)
+                );
+
+                vec2 orbitB = vec2(
+                    0.28 * cos(u_time * 0.18 + 2.7),
+                    0.25 * sin(u_time * 0.18 + 2.7)
+                );
+
+                float dropA =
+                    length(point - orbitA) - 0.135;
+
+                float dropB =
+                    length(point - orbitB) - 0.105;
+
+                float combined = smoothUnion(
+                    mainBody - 0.15,
+                    dropA,
+                    0.09
+                );
+
+                combined = smoothUnion(
+                    combined,
+                    dropB,
+                    0.075
+                );
+
+                distanceField = abs(combined);
+                bodyWidth = 0.19;
+            } else {
+                distanceField = recoveryDistance;
+                bodyWidth = 0.17 + recoveryAmount * 0.04;
+            }
+
+            float body = 1.0 - smoothstep(
+                bodyWidth,
+                bodyWidth + 0.11,
+                distanceField
+            );
+
+            float taper = exp(
+                -0.62 * dot(point, point)
+            );
+
+            float asymmetry =
+                0.82
+                + 0.18 * sin(
+                    point.x * 2.6
+                    + point.y * 1.7
+                    + u_time * 0.11
+                );
+
+            float height =
+                body
+                * taper
+                * asymmetry;
+
+            if (mode > 1.5 && mode < 2.5) {
+                height +=
+                    0.07
+                    * sin(point.x * 9.0 - u_time * 1.8)
+                    * body;
+            }
+
+            return max(height, 0.0);
+        }
+
+        vec3 surfaceNormal(vec2 point) {
+            float epsilon = 0.0028;
+
+            float centre = lensHeight(point);
+            float right = lensHeight(
+                point + vec2(epsilon, 0.0)
+            );
+            float up = lensHeight(
+                point + vec2(0.0, epsilon)
+            );
+
+            vec3 tangentX = vec3(
+                epsilon,
+                0.0,
+                (right - centre) * 0.78
+            );
+
+            vec3 tangentY = vec3(
+                0.0,
+                epsilon,
+                (up - centre) * 0.78
+            );
+
+            return normalize(cross(tangentX, tangentY));
+        }
+
+        vec3 environmentReflection(vec3 direction) {
+            float horizon = saturate(
+                direction.y * 0.5 + 0.5
+            );
+
+            vec3 upper = vec3(
+                0.20,
+                0.22,
+                0.25
+            );
+
+            vec3 lower = vec3(
+                0.010,
+                0.009,
+                0.008
+            );
+
+            vec3 environment = mix(
+                lower,
+                upper,
+                pow(horizon, 2.2)
+            );
+
+            float strip =
+                exp(
+                    -90.0
+                    * pow(direction.y - 0.32, 2.0)
+                )
+                * smoothstep(
+                    -0.80,
+                    0.65,
+                    direction.x
+                );
+
+            environment +=
+                strip
+                * vec3(0.72, 0.77, 0.83);
+
+            float warmStrip =
+                exp(
+                    -130.0
+                    * pow(direction.y + 0.12, 2.0)
+                )
+                * smoothstep(
+                    0.85,
+                    -0.60,
+                    direction.x
+                );
+
+            environment +=
+                warmStrip
+                * vec3(0.28, 0.17, 0.085);
+
+            return environment;
+        }
+
+        void main() {
+            vec2 uv = v_uv;
+            vec2 aspect = vec2(
+                u_resolution.x / u_resolution.y,
+                1.0
+            );
+
+            vec2 point =
+                (uv * 2.0 - 1.0) * aspect;
+
+            float radius = length(point);
+
+            vec3 background = vec3(
+                0.006,
+                0.007,
+                0.008
+            );
+
+            if (radius > 0.88) {
+                float housing =
+                    1.0
+                    - smoothstep(
+                        0.885,
+                        0.925,
+                        radius
+                    );
+
+                float brass =
+                    1.0
+                    - smoothstep(
+                        0.895,
+                        0.910,
+                        abs(radius - 0.900)
+                    );
+
+                vec3 housingColour = vec3(
+                    0.030,
+                    0.027,
+                    0.023
+                );
+
+                housingColour +=
+                    brass
+                    * vec3(
+                        0.24,
+                        0.145,
+                        0.065
+                    );
+
+                gl_FragColor = vec4(
+                    mix(
+                        background,
+                        housingColour,
+                        housing
+                    ),
+                    1.0
+                );
+
+                return;
+            }
+
+            vec2 lensPoint = point / 0.88;
+            float lensRadius = length(lensPoint);
+
+            float height = lensHeight(lensPoint);
+            vec3 normal = surfaceNormal(lensPoint);
+
+            vec3 viewDirection = normalize(
+                vec3(
+                    lensPoint.x * 0.24,
+                    lensPoint.y * 0.24,
+                    1.0
+                )
+            );
+
+            vec3 reflected = reflect(
+                -viewDirection,
+                normal
+            );
+
+            vec3 environment =
+                environmentReflection(reflected);
+
+            float fresnel = pow(
+                1.0 - saturate(
+                    dot(normal, viewDirection)
+                ),
+                3.2
+            );
+
+            float materialMask = smoothstep(
+                0.025,
+                0.32,
+                height
+            );
+
+            vec3 abyss = vec3(
+                0.004,
+                0.005,
+                0.006
+            );
+
+            vec3 graphite = vec3(
+                0.018,
+                0.020,
+                0.022
+            );
+
+            vec3 liquid =
+                graphite
+                + environment * (
+                    0.72 + 0.70 * fresnel
+                );
+
+            liquid *=
+                0.72
+                + 0.45 * materialMask;
+
+            float edgeSpecular = pow(
+                saturate(
+                    dot(
+                        normal,
+                        normalize(
+                            vec3(-0.6, 0.75, 0.8)
+                        )
+                    )
+                ),
+                34.0
+            );
+
+            liquid +=
+                edgeSpecular
+                * vec3(
+                    0.74,
+                    0.78,
+                    0.82
+                )
+                * materialMask;
+
+            vec3 colour = mix(
+                abyss,
+                liquid,
+                materialMask
+            );
+
+            float glassRim =
+                exp(
+                    -950.0
+                    * pow(lensRadius - 0.975, 2.0)
+                );
+
+            float innerGlass =
+                exp(
+                    -180.0
+                    * pow(lensRadius - 0.91, 2.0)
+                );
+
+            float angle = atan(
+                lensPoint.y,
+                lensPoint.x
+            );
+
+            colour += glassRim * vec3(
+                0.16,
+                0.10
+                    + 0.05 * cos(angle),
+                0.22
+            );
+
+            colour += innerGlass * vec3(
+                0.015,
+                0.025,
+                0.040
+            );
+
+            float cavityShade =
+                smoothstep(
+                    1.0,
+                    0.62,
+                    lensRadius
+                );
+
+            colour *= 0.70 + 0.30 * cavityShade;
+
+            float transitionFade = smoothstep(
+                0.0,
+                0.45,
+                u_transition
+            );
+
+            colour *= 0.82 + 0.18 * transitionFade;
+
+            gl_FragColor = vec4(
+                pow(
+                    clamp(colour, 0.0, 1.0),
+                    vec3(0.78)
+                ),
+                1.0
+            );
+        }
+    `;
+
+    function compileShader(type, source) {
+        const shader = gl.createShader(type);
+
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+
+        if (!gl.getShaderParameter(
+            shader,
+            gl.COMPILE_STATUS
+        )) {
+            const message = gl.getShaderInfoLog(shader);
+            gl.deleteShader(shader);
+            throw new Error(message);
+        }
+
+        return shader;
+    }
+
+    function createProgram() {
+        const vertex = compileShader(
+            gl.VERTEX_SHADER,
+            vertexSource
+        );
+
+        const fragment = compileShader(
+            gl.FRAGMENT_SHADER,
+            fragmentSource
+        );
+
+        const program = gl.createProgram();
+
+        gl.attachShader(program, vertex);
+        gl.attachShader(program, fragment);
+        gl.linkProgram(program);
+
+        if (!gl.getProgramParameter(
+            program,
+            gl.LINK_STATUS
+        )) {
+            throw new Error(
+                gl.getProgramInfoLog(program)
+            );
+        }
+
+        return program;
+    }
+
+    let program;
+
+    try {
+        program = createProgram();
+    } catch (error) {
+        errorLabel.textContent =
+            "Shader error:\n" + error.message;
+        return;
+    }
+
+    const positionLocation =
+        gl.getAttribLocation(
+            program,
+            "a_position"
+        );
+
+    const resolutionLocation =
+        gl.getUniformLocation(
+            program,
+            "u_resolution"
+        );
+
+    const timeLocation =
+        gl.getUniformLocation(
+            program,
+            "u_time"
+        );
+
+    const modeLocation =
+        gl.getUniformLocation(
+            program,
+            "u_mode"
+        );
+
+    const transitionLocation =
+        gl.getUniformLocation(
+            program,
+            "u_transition"
+        );
+
+    const pointerLocation =
+        gl.getUniformLocation(
+            program,
+            "u_pointer"
+        );
+
+    const buffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+
+    gl.bufferData(
+        gl.ARRAY_BUFFER,
+        new Float32Array([
+            -1, -1,
+             1, -1,
+            -1,  1,
+            -1,  1,
+             1, -1,
+             1,  1
+        ]),
+        gl.STATIC_DRAW
+    );
+
+    const stateNames = {
+        1: "Idle",
+        2: "Typing",
+        3: "Mouse stroke",
+        4: "Fragmented",
+        5: "Recovery"
+    };
+
+    let mode = 1;
+    let automatic = false;
+    let lastModeChange = performance.now();
+    let transitionStarted = performance.now();
+    let pointer = { x: 0, y: 0 };
+
+    function setMode(nextMode) {
+        mode = nextMode;
+        transitionStarted = performance.now();
+        lastModeChange = performance.now();
+        stateLabel.textContent = stateNames[mode];
+
+        statusLabel.innerHTML =
+            "Liquid Lens v0.3<br>"
+            + "synthetic field<br>"
+            + "auto "
+            + (automatic ? "ON" : "OFF");
+    }
+
+    window.addEventListener("keydown", event => {
+        const key = event.key.toLowerCase();
+
+        if (key === "escape") {
+            window.close();
+            return;
+        }
+
+        if (key === "a") {
+            automatic = !automatic;
+            lastModeChange = performance.now();
+            setMode(mode);
+            return;
+        }
+
+        const number = Number(key);
+
+        if (number >= 1 && number <= 5) {
+            automatic = false;
+            setMode(number);
+        }
+    });
+
+    window.addEventListener("pointermove", event => {
+        pointer.x =
+            (event.clientX / window.innerWidth) * 2 - 1;
+
+        pointer.y =
+            1 - (event.clientY / window.innerHeight) * 2;
+    });
+
+    function resize() {
+        const scale = Math.min(
+            window.devicePixelRatio || 1,
+            2
+        );
+
+        const width = Math.floor(
+            window.innerWidth * scale
+        );
+
+        const height = Math.floor(
+            window.innerHeight * scale
+        );
+
+        if (
+            canvas.width !== width
+            || canvas.height !== height
+        ) {
+            canvas.width = width;
+            canvas.height = height;
+            gl.viewport(0, 0, width, height);
+        }
+    }
+
+    function render(now) {
+        resize();
+
+        if (
+            automatic
+            && now - lastModeChange > 9000
+        ) {
+            setMode(1 + (mode % 5));
+        }
+
+        gl.useProgram(program);
+
+        gl.bindBuffer(
+            gl.ARRAY_BUFFER,
+            buffer
+        );
+
+        gl.enableVertexAttribArray(
+            positionLocation
+        );
+
+        gl.vertexAttribPointer(
+            positionLocation,
+            2,
+            gl.FLOAT,
+            false,
+            0,
+            0
+        );
+
+        gl.uniform2f(
+            resolutionLocation,
+            canvas.width,
+            canvas.height
+        );
+
+        gl.uniform1f(
+            timeLocation,
+            now * 0.001
+        );
+
+        gl.uniform1f(
+            modeLocation,
+            mode
+        );
+
+        gl.uniform1f(
+            transitionLocation,
+            (now - transitionStarted) * 0.001
+        );
+
+        gl.uniform2f(
+            pointerLocation,
+            pointer.x,
+            pointer.y
+        );
+
+        gl.drawArrays(
+            gl.TRIANGLES,
+            0,
+            6
+        );
+
+        requestAnimationFrame(render);
+    }
+
+    setMode(1);
+    requestAnimationFrame(render);
+})();
+</script>
+</body>
+</html>

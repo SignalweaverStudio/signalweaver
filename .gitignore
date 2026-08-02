@@ -161,3 +161,14 @@ payload.json
 .claude/
 CLAUDE.md
 repo_structure.txt
+
+# Lacunar Mirror generated data and local runtime files
+lacunar_mirror_v0/.lacunar_active_session.json
+lacunar_mirror_v0/diagnostic_outputs/
+lacunar_mirror_v0/experiment_*_all_day*.csv
+lacunar_mirror_v0/epoch_b_*.csv
+lacunar_mirror_v0/live_test_*.csv
+lacunar_mirror_v0/lacunar_mirror_session.csv
+lacunar_mirror_v0/*_backup.py
+lacunar_mirror_v0/**/*_backup.py
+lacunar_mirror_v0/.venv/
